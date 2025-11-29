@@ -1,0 +1,428 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>NutriTrack Dashboard</title>
+    <link href="https://cdnjs.cloudflare.com/ajax/libs/bootstrap/5.3.0/css/bootstrap.min.css" rel="stylesheet">
+    <link href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css" rel="stylesheet">
+    <style>
+        :root {
+            --primary-color: #4caf50;
+            --primary-light: #81c784;
+            --primary-dark: #2e7d32;
+            --secondary-color: #8bc34a;
+            --light-green: #e8f5e9;
+            --accent-green: #c8e6c9;
+            --text-dark: #2c3e50;
+            --text-light: #7f8c8d;
+        }
+        
+        body {
+            background-color: #f5f8f5;
+            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+            color: var(--text-dark);
+        }
+        
+        .dashboard-container {
+            max-width: 1000px;
+            margin: 30px auto;
+        }
+        
+        .top-header {
+            background: linear-gradient(135deg, var(--primary-color), var(--secondary-color));
+            border-radius: 16px;
+            padding: 20px 30px;
+            color: white;
+            margin-bottom: 25px;
+            box-shadow: 0 5px 15px rgba(0, 0, 0, 0.1);
+        }
+        
+        .card {
+            border: none;
+            border-radius: 16px;
+            box-shadow: 0 4px 12px rgba(0, 0, 0, 0.05);
+            transition: transform 0.3s ease, box-shadow 0.3s ease;
+            margin-bottom: 25px;
+            overflow: hidden;
+        }
+        
+        .card:hover {
+            transform: translateY(-5px);
+            box-shadow: 0 8px 20px rgba(0, 0, 0, 0.1);
+        }
+        
+        .card-header {
+            background-color: var(--accent-green);
+            border-bottom: none;
+            padding: 15px 20px;
+            font-weight: 600;
+            display: flex;
+            align-items: center;
+        }
+        
+        .card-header i {
+            margin-right: 10px;
+            color: var(--primary-dark);
+        }
+        
+        .card-body {
+            padding: 25px;
+            background-color: white;
+        }
+        
+        .user-avatar {
+            width: 60px;
+            height: 60px;
+            border-radius: 50%;
+            background: linear-gradient(145deg, var(--primary-light), var(--secondary-color));
+            color: white;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            font-size: 24px;
+            font-weight: 600;
+            box-shadow: 0 4px 10px rgba(0, 0, 0, 0.1);
+        }
+        
+        .btn-custom {
+            background-color: var(--primary-color);
+            border-color: var(--primary-color);
+            color: white;
+            padding: 10px 24px;
+            border-radius: 8px;
+            font-weight: 500;
+            transition: all 0.3s ease;
+        }
+        
+        .btn-custom:hover {
+            background-color: var(--primary-dark);
+            border-color: var(--primary-dark);
+            color: white;
+            box-shadow: 0 4px 12px rgba(0, 0, 0, 0.15);
+        }
+        
+        .form-control {
+            border-radius: 8px;
+            padding: 12px 15px;
+            border: 1px solid #e0e0e0;
+        }
+        
+        .form-control:focus {
+            border-color: var(--primary-light);
+            box-shadow: 0 0 0 0.2rem rgba(76, 175, 80, 0.25);
+        }
+        
+        .form-label {
+            font-weight: 500;
+            margin-bottom: 8px;
+            color: var(--text-dark);
+        }
+        
+        .image-preview-container {
+            background-color: var(--light-green);
+            border-radius: 12px;
+            padding: 15px;
+            text-align: center;
+            margin-top: 15px;
+        }
+        
+        .image-preview {
+            max-width: 100%;
+            max-height: 250px;
+            border-radius: 8px;
+            box-shadow: 0 4px 8px rgba(0, 0, 0, 0.1);
+            display: none;
+        }
+        
+        .health-stats {
+            display: flex;
+            flex-wrap: wrap;
+            gap: 15px;
+            margin-top: 10px;
+        }
+        
+        .stat-item {
+            flex: 1;
+            min-width: 120px;
+            background-color: var(--light-green);
+            border-radius: 12px;
+            padding: 15px;
+            text-align: center;
+        }
+        
+        .stat-value {
+            font-size: 24px;
+            font-weight: 600;
+            color: var(--primary-dark);
+        }
+        
+        .stat-label {
+            font-size: 14px;
+            color: var(--text-light);
+            margin-top: 5px;
+        }
+        
+        .file-upload-wrapper {
+            position: relative;
+            margin-bottom: 15px;
+        }
+        
+        .custom-file-upload {
+            background-color: var(--light-green);
+            border: 2px dashed var(--primary-light);
+            border-radius: 12px;
+            padding: 30px;
+            text-align: center;
+            cursor: pointer;
+            transition: all 0.3s ease;
+        }
+        
+        .custom-file-upload:hover {
+            background-color: var(--accent-green);
+        }
+        
+        .custom-file-upload i {
+            font-size: 36px;
+            color: var(--primary-color);
+            margin-bottom: 10px;
+        }
+        
+        .upload-text {
+            font-weight: 500;
+        }
+        
+        .upload-hint {
+            font-size: 14px;
+            color: var(--text-light);
+            margin-top: 8px;
+        }
+        
+        .logout-btn {
+            background-color: transparent;
+            border: 1px solid rgba(255, 255, 255, 0.5);
+            color: white;
+            border-radius: 8px;
+            padding: 8px 16px;
+            transition: all 0.3s ease;
+        }
+        
+        .logout-btn:hover {
+            background-color: rgba(255, 255, 255, 0.1);
+            color: white;
+        }
+        
+        .welcome-subtitle {
+            opacity: 0.8;
+            font-weight: 300;
+            margin-top: 5px;
+        }
+        
+        .nutrition-tips {
+            padding: 0;
+            list-style: none;
+        }
+        
+        .nutrition-tips li {
+            padding: 10px 0;
+            border-bottom: 1px solid var(--light-green);
+            display: flex;
+            align-items: center;
+        }
+        
+        .nutrition-tips li:last-child {
+            border-bottom: none;
+        }
+        
+        .nutrition-tips i {
+            color: var(--primary-color);
+            margin-right: 10px;
+        }
+
+        /* Animation for dynamic content */
+        @keyframes fadeIn {
+            from { opacity: 0; transform: translateY(10px); }
+            to { opacity: 1; transform: translateY(0); }
+        }
+        
+        .animate-fade {
+            animation: fadeIn 0.5s ease forwards;
+        }
+        
+        .delayed-1 { animation-delay: 0.1s; }
+        .delayed-2 { animation-delay: 0.2s; }
+        .delayed-3 { animation-delay: 0.3s; }
+    </style>
+</head>
+<body>
+    <div class="container dashboard-container">
+        <!-- Top Header Section -->
+        <div class="top-header d-flex justify-content-between align-items-center">
+            <div class="d-flex align-items-center">
+                <div class="user-avatar me-3">
+                    {{ name[0] }}
+                </div>
+                <div>
+                    <h2 class="mb-0">Welcome, {{ name }}</h2>
+                    <p class="welcome-subtitle mb-0">{{ gender }} • NutriTrack Dashboard</p>
+                </div>
+            </div>
+            <a href="{{ url_for('logout') }}" class="btn logout-btn">
+                <i class="fas fa-sign-out-alt me-2"></i>Logout
+            </a>
+        </div>
+        
+        <div class="row">
+            <!-- Main Dashboard Content -->
+            <div class="col-lg-8">
+                <div class="card animate-fade">
+                    <div class="card-header">
+                        <i class="fas fa-camera"></i> Food Analysis
+                    </div>
+                    <div class="card-body">
+                        <p>Upload a photo of your meal to get nutritional information and personalized recommendations based on your health profile.</p>
+                        
+                        <form action="{{ url_for('dashboard') }}" method="post" enctype="multipart/form-data">
+                            <div class="row mb-4">
+                                <div class="col-md-4">
+                                    <label for="age" class="form-label">Age</label>
+                                    <input type="number" class="form-control" id="age" name="age" required>
+                                </div>
+                                <div class="col-md-4">
+                                    <label for="height" class="form-label">Height (cm)</label>
+                                    <input type="number" class="form-control" id="height" name="height" required>
+                                </div>
+                                <div class="col-md-4">
+                                    <label for="weight" class="form-label">Weight (kg)</label>
+                                    <input type="number" class="form-control" id="weight" name="weight" required>
+                                </div>
+                            </div>
+                            
+                            <div class="file-upload-wrapper">
+                                <input type="file" class="form-control d-none" id="food_image" name="food_image" accept="image/*" required onchange="previewImage(this)">
+                                <label for="food_image" class="custom-file-upload w-100">
+                                    <i class="fas fa-cloud-upload-alt d-block"></i>
+                                    <span class="upload-text">Drag & drop your food image or click to browse</span>
+                                    <p class="upload-hint">JPG, PNG or GIF • Max 10MB</p>
+                                </label>
+                            </div>
+                            
+                            <div class="image-preview-container">
+                                <img id="preview" class="image-preview">
+                            </div>
+                            
+                            <div class="text-center mt-4">
+                                <button type="submit" class="btn btn-custom">
+                                    <i class="fas fa-utensils me-2"></i>Analyze Food
+                                </button>
+                            </div>
+                        </form>
+                    </div>
+                </div>
+
+                <div class="card animate-fade delayed-1">
+                    <div class="card-header">
+                        <i class="fas fa-chart-line"></i> Health Metrics
+                    </div>
+                    <div class="card-body">
+                        <div class="health-stats">
+                            <div class="stat-item">
+                                <div class="stat-value" id="bmi-value">-</div>
+                                <div class="stat-label">BMI</div>
+                            </div>
+                            <div class="stat-item">
+                                <div class="stat-value" id="calories-value">-</div>
+                                <div class="stat-label">Daily Calories</div>
+                            </div>
+                            <div class="stat-item">
+                                <div class="stat-value" id="water-value">-</div>
+                                <div class="stat-label">Water (L)</div>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+            
+            <!-- Side Dashboard Content -->
+            <div class="col-lg-4">
+                <div class="card animate-fade delayed-2">
+                    <div class="card-header">
+                        <i class="fas fa-lightbulb"></i> Nutrition Tips
+                    </div>
+                    <div class="card-body">
+                        <ul class="nutrition-tips">
+                            <li><i class="fas fa-check-circle"></i> Aim for at least 5 servings of fruits and vegetables daily</li>
+                            <li><i class="fas fa-check-circle"></i> Stay hydrated with 2-3 liters of water per day</li>
+                            <li><i class="fas fa-check-circle"></i> Include protein in every meal for balanced nutrition</li>
+                            <li><i class="fas fa-check-circle"></i> Limit processed foods and added sugars</li>
+                        </ul>
+                    </div>
+                </div>
+                
+                <div class="card animate-fade delayed-3">
+                    <div class="card-header">
+                        <i class="fas fa-history"></i> Recent Activity
+                    </div>
+                    <div class="card-body">
+                        <p class="text-center text-muted">Upload your first meal to see activity here</p>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+    
+    <script>
+        // Preview uploaded image
+        function previewImage(input) {
+            const preview = document.getElementById('preview');
+            if (input.files && input.files[0]) {
+                const reader = new FileReader();
+                reader.onload = function(e) {
+                    preview.src = e.target.result;
+                    preview.style.display = 'block';
+                }
+                reader.readAsDataURL(input.files[0]);
+            }
+        }
+        
+        // Calculate BMI and other metrics when form inputs change
+        document.addEventListener('DOMContentLoaded', function() {
+            const ageInput = document.getElementById('age');
+            const heightInput = document.getElementById('height');
+            const weightInput = document.getElementById('weight');
+            
+            const updateMetrics = function() {
+                const age = parseFloat(ageInput.value) || 0;
+                const height = parseFloat(heightInput.value) || 0;
+                const weight = parseFloat(weightInput.value) || 0;
+                
+                if (height > 0 && weight > 0) {
+                    // Calculate BMI
+                    const heightInMeters = height / 100;
+                    const bmi = weight / (heightInMeters * heightInMeters);
+                    document.getElementById('bmi-value').textContent = bmi.toFixed(1);
+                    
+                    // Estimate daily caloric needs (using Harris-Benedict equation)
+                    let bmr = 0;
+                    if (age > 0) {
+                        // Simplified calculation - would need gender specifics for accuracy
+                        bmr = 10 * weight + 6.25 * height - 5 * age;
+                        // Adding activity factor of 1.2 (sedentary)
+                        const calories = Math.round(bmr * 1.2);
+                        document.getElementById('calories-value').textContent = calories;
+                    }
+                    
+                    // Recommended water intake (ml) based on weight
+                    const waterIntake = (weight * 0.033).toFixed(1);
+                    document.getElementById('water-value').textContent = waterIntake;
+                }
+            };
+            
+            ageInput.addEventListener('input', updateMetrics);
+            heightInput.addEventListener('input', updateMetrics);
+            weightInput.addEventListener('input', updateMetrics);
+        });
+    </script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/bootstrap/5.3.0/js/bootstrap.bundle.min.js"></script>
+</body>
+</html>

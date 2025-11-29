@@ -1,0 +1,177 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Food Analysis Results</title>
+    <link href="https://cdnjs.cloudflare.com/ajax/libs/bootstrap/5.3.0/css/bootstrap.min.css" rel="stylesheet">
+    <style>
+        body {
+            background-color: #f8f9fa;
+            padding-top: 20px;
+        }
+        .results-container {
+            max-width: 800px;
+            margin: 0 auto;
+            background-color: white;
+            border-radius: 10px;
+            box-shadow: 0 0 15px rgba(0,0,0,0.1);
+            padding: 30px;
+        }
+        .user-header {
+            margin-bottom: 30px;
+            border-bottom: 1px solid #e9ecef;
+            padding-bottom: 20px;
+        }
+        .result-section {
+            margin-bottom: 25px;
+        }
+        .nutrition-card {
+            background-color: #f8f9fa;
+            border-radius: 8px;
+            padding: 15px;
+            margin-bottom: 20px;
+        }
+        .section-title {
+            color: #4e73df;
+            margin-bottom: 15px;
+            font-weight: 600;
+        }
+        .health-metrics {
+            display: flex;
+            justify-content: space-between;
+            margin-bottom: 20px;
+        }
+        .metric-box {
+            background-color: #f1f5fe;
+            border-radius: 8px;
+            padding: 10px 15px;
+            text-align: center;
+            flex: 1;
+            margin: 0 5px;
+        }
+        .metric-box h5 {
+            font-size: 14px;
+            color: #5a5c69;
+            margin-bottom: 5px;
+        }
+        .metric-box p {
+            font-size: 18px;
+            font-weight: 600;
+            margin-bottom: 0;
+        }
+        .header-row {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+        }
+        .avatar {
+            width: 60px;
+            height: 60px;
+            border-radius: 50%;
+            background-color: #e9ecef;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            font-size: 24px;
+            margin-right: 15px;
+        }
+        .user-details {
+            display: flex;
+            align-items: center;
+        }
+        .recommendation {
+            border-left: 4px solid #4e73df;
+            padding-left: 15px;
+        }
+        .food-image {
+            max-width: 100%;
+            max-height: 250px;
+            border-radius: 8px;
+            margin-bottom: 20px;
+        }
+    </style>
+</head>
+<body>
+    <div class="container results-container">
+        <div class="header-row">
+            <div class="user-details">
+                <div class="avatar">
+                    {{ name[0] }}
+                </div>
+                <div>
+                    <h2>Food Analysis Results</h2>
+                    <p class="text-muted">For {{ name }}</p>
+                </div>
+            </div>
+            <div>
+                <a href="{{ url_for('dashboard') }}" class="btn btn-outline-primary">Back to Dashboard</a>
+                <a href="{{ url_for('logout') }}" class="btn btn-outline-secondary">Logout</a>
+            </div>
+        </div>
+        
+        <div class="user-header">
+            <div class="health-metrics">
+                <div class="metric-box">
+                    <h5>Age</h5>
+                    <p>{{ age }} years</p>
+                </div>
+                <div class="metric-box">
+                    <h5>Height</h5>
+                    <p>{{ height }} cm</p>
+                </div>
+                <div class="metric-box">
+                    <h5>Weight</h5>
+                    <p>{{ weight }} kg</p>
+                </div>
+                <div class="metric-box">
+                    <h5>BMI</h5>
+                    <p>{{ bmi }}</p>
+                </div>
+            </div>
+        </div>
+
+        <div class="result-section">
+            <h4 class="section-title">Food Identification</h4>
+            {% if food_image_path %}
+            <img src="{{ food_image_path }}" alt="Uploaded food" class="food-image">
+            {% else %}
+            <div class="alert alert-info">Food image not available</div>
+            {% endif %}
+            <h5>Identified as: <strong>{{ food_name }}</strong></h5>
+        </div>
+        
+        <div class="result-section">
+            <h4 class="section-title">Nutritional Information</h4>
+            <div class="nutrition-card">
+                <div>{{ nutrition|safe }}</div>
+            </div>
+        </div>
+        
+        <div class="result-section">
+            <h4 class="section-title">Health Assessment</h4>
+            <div class="alert {{ 'alert-success' if 'good' in good_for_user.lower() else 'alert-warning' }}">
+                {{ good_for_user }}
+            </div>
+        </div>
+        
+        <div class="result-section">
+            <h4 class="section-title">Recommended Diet Plan</h4>
+            <div class="card mb-3">
+                <div class="card-body">
+                    {{ diet_plan }}
+                </div>
+            </div>
+        </div>
+        
+        <div class="result-section">
+            <h4 class="section-title">Personalized Recommendation</h4>
+            <div class="recommendation">
+                <p>{{ recommendation }}</p>
+            </div>
+        </div>
+    </div>
+    
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/bootstrap/5.3.0/js/bootstrap.bundle.min.js"></script>
+</body>
+</html>
