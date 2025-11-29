@@ -783,37 +783,57 @@ def migrate_database():
 
 # Initialize database tables when app starts (works for both development and production)
 # This ensures tables are created on Render when gunicorn starts the app
-with app.app_context():
-    try:
-        print("Initializing database...")
-        # Try to create all tables (idempotent - won't recreate if they exist)
-        db.create_all()
-        
-        # Verify tables exist
-        inspector = db.inspect(db.engine)
-        tables = inspector.get_table_names()
-        required_tables = ['user', 'otp', 'health_data']
-        
-        missing_tables = [t for t in required_tables if t not in tables]
-        if missing_tables:
-            print(f"⚠️  Missing tables: {missing_tables}. Creating...")
-            db.create_all()
-            print("✓ All tables created.")
-        else:
-            print("✓ Database tables verified.")
-        
-        # Run migration if needed
-        migrate_database()
-        
-    except Exception as e:
-        print(f"⚠️  Database initialization error: {e}")
-        # Try to create tables anyway
+def init_database():
+    """Initialize database tables - called when app starts"""
+    with app.app_context():
         try:
+            print("="*60)
+            print("Initializing database...")
+            print(f"Database URI: {app.config['SQLALCHEMY_DATABASE_URI'][:50]}...")
+            print("="*60)
+            
+            # Try to create all tables (idempotent - won't recreate if they exist)
             db.create_all()
-            print("✓ Tables created after error recovery.")
-        except Exception as e2:
-            print(f"❌ Critical database error: {e2}")
-            print("Please check DATABASE_URL in environment variables.")
+            
+            # Verify tables exist
+            try:
+                inspector = db.inspect(db.engine)
+                tables = inspector.get_table_names()
+                required_tables = ['user', 'otp', 'health_data']
+                
+                missing_tables = [t for t in required_tables if t not in tables]
+                if missing_tables:
+                    print(f"⚠️  Missing tables: {missing_tables}. Creating...")
+                    db.create_all()
+                    print("✓ All tables created.")
+                else:
+                    print(f"✓ Database tables verified: {tables}")
+                
+                # Run migration if needed
+                migrate_database()
+                print("="*60)
+                
+            except Exception as inspect_error:
+                print(f"⚠️  Could not inspect tables: {inspect_error}")
+                print("Creating all tables...")
+                db.create_all()
+                print("✓ Tables created.")
+            
+        except Exception as e:
+            print(f"⚠️  Database initialization error: {e}")
+            import traceback
+            traceback.print_exc()
+            # Try to create tables anyway
+            try:
+                db.create_all()
+                print("✓ Tables created after error recovery.")
+            except Exception as e2:
+                print(f"❌ Critical database error: {e2}")
+                print("Please check DATABASE_URL in environment variables.")
+                print("="*60)
+
+# Initialize database when module is imported
+init_database()
 
 if __name__ == '__main__':
     # Only run with debug=True in development
