@@ -781,37 +781,41 @@ def migrate_database():
         else:
             print(f"Database check error: {e}")
 
-if __name__ == '__main__':
-    with app.app_context():
-        # Force create all tables
+# Initialize database tables when app starts (works for both development and production)
+# This ensures tables are created on Render when gunicorn starts the app
+with app.app_context():
+    try:
         print("Initializing database...")
+        # Try to create all tables (idempotent - won't recreate if they exist)
+        db.create_all()
+        
+        # Verify tables exist
+        inspector = db.inspect(db.engine)
+        tables = inspector.get_table_names()
+        required_tables = ['user', 'otp', 'health_data']
+        
+        missing_tables = [t for t in required_tables if t not in tables]
+        if missing_tables:
+            print(f"⚠️  Missing tables: {missing_tables}. Creating...")
+            db.create_all()
+            print("✓ All tables created.")
+        else:
+            print("✓ Database tables verified.")
+        
+        # Run migration if needed
+        migrate_database()
+        
+    except Exception as e:
+        print(f"⚠️  Database initialization error: {e}")
+        # Try to create tables anyway
         try:
-            # Drop and recreate if tables are missing (only in development)
-            inspector = db.inspect(db.engine)
-            tables = inspector.get_table_names()
-            required_tables = ['user', 'otp', 'health_data']
-            
-            if not all(t in tables for t in required_tables):
-                print("⚠️  Some tables are missing. Recreating database...")
-                db.drop_all()
-                db.create_all()
-                print("✓ Database recreated with all tables.")
-            else:
-                create_tables()
-        except Exception as e:
-            # If inspection fails, try to create tables
-            if "no such table" in str(e).lower() or "OperationalError" in str(type(e).__name__):
-                print("⚠️  Database tables missing. Creating all tables...")
-                try:
-                    db.drop_all()
-                    db.create_all()
-                    print("✓ All tables created successfully.")
-                except Exception as e2:
-                    print(f"❌ Error: {e2}")
-                    print("Please stop the app, delete instance/users.db, and restart.")
-            else:
-                create_tables()
-    
+            db.create_all()
+            print("✓ Tables created after error recovery.")
+        except Exception as e2:
+            print(f"❌ Critical database error: {e2}")
+            print("Please check DATABASE_URL in environment variables.")
+
+if __name__ == '__main__':
     # Only run with debug=True in development
     # In production, Render will use gunicorn to run the app
     debug_mode = os.getenv('FLASK_ENV') != 'production'
