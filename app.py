@@ -831,13 +831,17 @@ def admin_dashboard():
 @app.route('/admin/delete_user/<int:user_id>', methods=['POST'])
 def delete_user(user_id):
     """Delete a user account (admin only) - Admin account is protected and cannot be deleted"""
+    print(f"🗑️  Delete user request received for user_id: {user_id}")
+    
     # Check if user is admin
     if not session.get('admin'):
+        print(f"❌ Access denied - not admin")
         flash('Access denied. Admin privileges required.')
         return redirect(url_for('login'))
     
     try:
         user = User.query.get_or_404(user_id)
+        print(f"📋 Found user: {user.email} (ID: {user.id})")
         
         # STRICT PROTECTION: Prevent deletion of admin account
         # Multiple checks to ensure admin account cannot be deleted

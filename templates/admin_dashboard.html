@@ -216,10 +216,8 @@
                                 {% if user.email.upper() == 'CHANDAN' %}
                                     <span style="color: #dc3545; font-weight: bold;">🔒 Protected</span>
                                 {% else %}
-                                    <form action="{{ url_for('delete_user', user_id=user.id) }}" method="post" 
-                                          onsubmit="return confirm('Are you sure you want to delete user {{ user.email }}? This action cannot be undone.');" 
-                                          style="display: inline;">
-                                        <button type="submit" class="btn-delete">Delete</button>
+                                    <form id="delete-form-{{ user.id }}" action="{{ url_for('delete_user', user_id=user.id) }}" method="POST" style="display: inline;">
+                                        <button type="button" class="btn-delete" data-user-id="{{ user.id }}" data-user-email="{{ user.email }}">🗑️ Delete</button>
                                     </form>
                                 {% endif %}
                             </td>
@@ -242,6 +240,42 @@
     </div>
 
     <script src="https://cdnjs.cloudflare.com/ajax/libs/bootstrap/5.3.0/js/bootstrap.bundle.min.js"></script>
+    <script>
+        // Debug: Log page load and attach event listeners
+        document.addEventListener('DOMContentLoaded', function() {
+            console.log('Admin dashboard loaded');
+            
+            const deleteButtons = document.querySelectorAll('.btn-delete');
+            console.log('Found', deleteButtons.length, 'delete buttons');
+            
+            deleteButtons.forEach(function(button) {
+                button.addEventListener('click', function() {
+                    const userId = this.getAttribute('data-user-id');
+                    const userEmail = this.getAttribute('data-user-email');
+                    
+                    console.log('Delete button clicked for user:', userId, userEmail);
+                    
+                    const message = '⚠️ Are you sure you want to delete user ' + userEmail + '?\n\n' +
+                                  'This will permanently delete:\n' +
+                                  '- User account\n' +
+                                  '- All health data\n' +
+                                  '- Email verifications\n' +
+                                  '- Password reset tokens\n\n' +
+                                  'This action CANNOT be undone!';
+                    
+                    if (confirm(message)) {
+                        console.log('User confirmed deletion, submitting form...');
+                        const form = document.getElementById('delete-form-' + userId);
+                        console.log('Form action:', form.action);
+                        console.log('Form method:', form.method);
+                        form.submit();
+                    } else {
+                        console.log('User cancelled deletion');
+                    }
+                });
+            });
+        });
+    </script>
 </body>
 </html>
 
