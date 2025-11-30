@@ -128,11 +128,20 @@ def send_otp_email(email, otp_code, user_name=None):
     Send OTP to user's email address dynamically.
     Works with any email address - Gmail, Outlook, Yahoo, etc.
     
+    IMPORTANT: This function ONLY sends email via SMTP.
+    It NEVER returns email content - only returns True/False for success/failure.
+    
     Args:
         email: Recipient email address (dynamic - any email)
         otp_code: 6-digit OTP code
         user_name: Optional user name for personalization
+    
+    Returns:
+        bool: True if email sent successfully, False otherwise
     """
+    # CRITICAL: Never return email content - only return boolean
+    email_body_html = None  # Keep email content local, never return it
+    
     try:
         # Validate email format
         if not validate_email(email):
@@ -167,9 +176,10 @@ def send_otp_email(email, otp_code, user_name=None):
             print("\nFor Gmail: Use App Password (not regular password)")
             print("  Go to: Google Account > Security > 2-Step Verification > App passwords")
             print("="*60 + "\n")
+            # CRITICAL: Return False, never return email content
             return False
         
-        # Create message
+        # Create message object
         msg = MIMEMultipart()
         msg['From'] = f"Health Food Monitor <{SMTP_USERNAME}>"
         msg['To'] = email
@@ -178,8 +188,8 @@ def send_otp_email(email, otp_code, user_name=None):
         # Personalize greeting
         greeting = f"Hello {user_name}!" if user_name else "Hello!"
         
-        # Email body with personalization
-        body = f"""
+        # Build email body HTML (stored in local variable, never returned)
+        email_body_html = f"""
         <html>
             <body style="font-family: Arial, sans-serif; line-height: 1.6; color: #333; margin: 0; padding: 0;">
                 <div style="max-width: 600px; margin: 0 auto; padding: 20px; border: 1px solid #ddd; border-radius: 10px; background-color: #ffffff;">
@@ -199,7 +209,12 @@ def send_otp_email(email, otp_code, user_name=None):
         </html>
         """
         
-        msg.attach(MIMEText(body, 'html'))
+        # Attach HTML body to message (NOT returned to browser)
+        msg.attach(MIMEText(email_body_html, 'html'))
+        
+        # CRITICAL: Clear email_body_html reference after attaching (defensive programming)
+        # This ensures it can't accidentally be returned
+        email_body_html = None
         
         # Send email
         print(f"\n{'='*60}")
