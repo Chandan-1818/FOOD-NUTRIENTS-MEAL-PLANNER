@@ -168,10 +168,17 @@ def send_verification_email(email, otp_code):
         smtp_username = os.getenv('SMTP_USERNAME')
         smtp_password = os.getenv('SMTP_PASSWORD')
         
-        # If email not configured, return False
+        # If email not configured, return False with detailed error
         if not smtp_username or not smtp_password:
             print(f"⚠️  Email not configured. Cannot send OTP to {email}")
-            print(f"   Please configure SMTP settings in .env file")
+            print(f"   SMTP_USERNAME: {'SET' if smtp_username else 'NOT SET'}")
+            print(f"   SMTP_PASSWORD: {'SET' if smtp_password else 'NOT SET'}")
+            print(f"   SMTP_SERVER: {smtp_server}")
+            print(f"   SMTP_PORT: {smtp_port}")
+            print(f"   Environment: {'PRODUCTION (Render)' if os.getenv('DATABASE_URL') else 'LOCAL'}")
+            print(f"   Please configure SMTP settings in Render Environment Variables:")
+            print(f"   - Go to Render Dashboard → Your Service → Environment tab")
+            print(f"   - Add: SMTP_SERVER, SMTP_PORT, SMTP_USERNAME, SMTP_PASSWORD")
             return False
         
         # Create email message
@@ -222,8 +229,12 @@ def send_verification_email(email, otp_code):
     except smtplib.SMTPAuthenticationError as e:
         error_msg = f"Email authentication failed: {str(e)}"
         print(f"❌ {error_msg}")
-        print(f"   Please check SMTP_USERNAME and SMTP_PASSWORD in .env file")
-        print(f"   Make sure you're using an App Password, not your regular password")
+        print(f"   Environment: {'PRODUCTION (Render)' if os.getenv('DATABASE_URL') else 'LOCAL'}")
+        print(f"   SMTP_USERNAME: {smtp_username}")
+        print(f"   SMTP_SERVER: {smtp_server}:{smtp_port}")
+        print(f"   Please check SMTP_USERNAME and SMTP_PASSWORD in Render Environment Variables")
+        print(f"   For Gmail: Make sure you're using an App Password, not your regular password")
+        print(f"   Generate App Password at: https://myaccount.google.com/apppasswords")
         import traceback
         traceback.print_exc()
         return False
@@ -871,6 +882,111 @@ def delete_user(user_id):
         flash('Error deleting user. Please try again.')
     
     return redirect(url_for('admin_dashboard'))
+
+@app.route('/admin/test_email')
+def admin_test_email():
+    """Test email configuration (admin only)"""
+    # Check if user is admin
+    if not session.get('admin'):
+        flash('Access denied. Admin privileges required.')
+        return redirect(url_for('login'))
+    
+    # Get configuration
+    smtp_server = os.getenv('SMTP_SERVER', 'smtp.gmail.com')
+    smtp_port = os.getenv('SMTP_PORT', '587')
+    smtp_username = os.getenv('SMTP_USERNAME')
+    smtp_password = os.getenv('SMTP_PASSWORD')
+    
+    results = {
+        'smtp_server': smtp_server,
+        'smtp_port': smtp_port,
+        'smtp_username': smtp_username if smtp_username else '❌ NOT SET',
+        'smtp_password': '✅ SET' if smtp_password else '❌ NOT SET',
+        'tests': []
+    }
+    
+    # Test 1: Check if credentials are set
+    if not smtp_username or not smtp_password:
+        results['tests'].append({
+            'name': 'Credentials Check',
+            'status': '❌ FAIL',
+            'message': 'SMTP_USERNAME or SMTP_PASSWORD not set in environment variables'
+        })
+        return render_template('admin_test_email.html', results=results)
+    else:
+        results['tests'].append({
+            'name': 'Credentials Check',
+            'status': '✅ PASS',
+            'message': 'Both SMTP_USERNAME and SMTP_PASSWORD are set'
+        })
+    
+    # Test 2: Test SMTP connection
+    try:
+        socket.setdefaulttimeout(10)
+        server = smtplib.SMTP(smtp_server, int(smtp_port), timeout=10)
+        results['tests'].append({
+            'name': 'SMTP Connection',
+            'status': '✅ PASS',
+            'message': f'Successfully connected to {smtp_server}:{smtp_port}'
+        })
+    except Exception as e:
+        results['tests'].append({
+            'name': 'SMTP Connection',
+            'status': '❌ FAIL',
+            'message': f'Connection failed: {str(e)}'
+        })
+        return render_template('admin_test_email.html', results=results)
+    
+    # Test 3: Test TLS
+    try:
+        server.starttls()
+        results['tests'].append({
+            'name': 'TLS Encryption',
+            'status': '✅ PASS',
+            'message': 'TLS encryption enabled successfully'
+        })
+    except Exception as e:
+        results['tests'].append({
+            'name': 'TLS Encryption',
+            'status': '❌ FAIL',
+            'message': f'TLS failed: {str(e)}'
+        })
+        server.quit()
+        return render_template('admin_test_email.html', results=results)
+    
+    # Test 4: Test authentication
+    try:
+        server.login(smtp_username, smtp_password)
+        results['tests'].append({
+            'name': 'Authentication',
+            'status': '✅ PASS',
+            'message': 'Authentication successful'
+        })
+    except smtplib.SMTPAuthenticationError as e:
+        results['tests'].append({
+            'name': 'Authentication',
+            'status': '❌ FAIL',
+            'message': f'Authentication failed: {str(e)}. Make sure you\'re using an App Password (Gmail) or correct password.'
+        })
+        server.quit()
+        return render_template('admin_test_email.html', results=results)
+    except Exception as e:
+        results['tests'].append({
+            'name': 'Authentication',
+            'status': '❌ FAIL',
+            'message': f'Authentication error: {str(e)}'
+        })
+        server.quit()
+        return render_template('admin_test_email.html', results=results)
+    
+    server.quit()
+    results['tests'].append({
+        'name': 'All Tests',
+        'status': '✅ PASS',
+        'message': 'Email configuration is working correctly!'
+    })
+    
+    return render_template('admin_test_email.html', results=results)
 
 @app.route('/admin/logout')
 def admin_logout():

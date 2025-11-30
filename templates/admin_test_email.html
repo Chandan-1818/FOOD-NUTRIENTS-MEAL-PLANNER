@@ -1,0 +1,133 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Email Configuration Test - Admin</title>
+    <link href="https://cdnjs.cloudflare.com/ajax/libs/bootstrap/5.3.0/css/bootstrap.min.css" rel="stylesheet">
+    <style>
+        body {
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            min-height: 100vh;
+            padding: 20px 0;
+        }
+        .test-container {
+            max-width: 900px;
+            margin: 0 auto;
+            background: white;
+            border-radius: 15px;
+            box-shadow: 0 10px 30px rgba(0,0,0,0.3);
+            padding: 30px;
+        }
+        .test-header {
+            border-bottom: 3px solid #667eea;
+            padding-bottom: 20px;
+            margin-bottom: 30px;
+        }
+        .test-header h1 {
+            color: #667eea;
+            font-weight: bold;
+        }
+        .config-info {
+            background: #f8f9fa;
+            border-left: 4px solid #667eea;
+            padding: 15px;
+            margin-bottom: 20px;
+            border-radius: 4px;
+        }
+        .test-result {
+            padding: 15px;
+            margin-bottom: 15px;
+            border-radius: 8px;
+            border-left: 4px solid #ccc;
+        }
+        .test-result.pass {
+            background: #d4edda;
+            border-left-color: #28a745;
+        }
+        .test-result.fail {
+            background: #f8d7da;
+            border-left-color: #dc3545;
+        }
+        .status-badge {
+            font-weight: bold;
+            font-size: 18px;
+            margin-right: 10px;
+        }
+        .btn-back {
+            background-color: #667eea;
+            color: white;
+            border: none;
+            padding: 10px 20px;
+            border-radius: 5px;
+            text-decoration: none;
+            display: inline-block;
+            margin-top: 20px;
+        }
+        .btn-back:hover {
+            background-color: #5568d3;
+            color: white;
+        }
+    </style>
+</head>
+<body>
+    <div class="container test-container">
+        <div class="test-header">
+            <h1>📧 Email Configuration Test</h1>
+            <p class="text-muted">Diagnostic tool for email setup</p>
+        </div>
+
+        <div class="config-info">
+            <h5>Current Configuration:</h5>
+            <ul class="mb-0">
+                <li><strong>SMTP Server:</strong> {{ results.smtp_server }}</li>
+                <li><strong>SMTP Port:</strong> {{ results.smtp_port }}</li>
+                <li><strong>SMTP Username:</strong> {{ results.smtp_username }}</li>
+                <li><strong>SMTP Password:</strong> {{ results.smtp_password }}</li>
+            </ul>
+        </div>
+
+        <h3 class="mb-3">Test Results:</h3>
+        
+        {% for test in results.tests %}
+        <div class="test-result {{ 'pass' if '✅' in test.status else 'fail' }}">
+            <span class="status-badge">{{ test.status }}</span>
+            <strong>{{ test.name }}</strong>
+            <p class="mb-0 mt-2">{{ test.message }}</p>
+        </div>
+        {% endfor %}
+
+        <div class="mt-4">
+            <h5>Next Steps:</h5>
+            <ul>
+                {% if '❌' in results.smtp_username or '❌' in results.smtp_password %}
+                <li>Go to Render Dashboard → Your Service → Environment tab</li>
+                <li>Add environment variables:
+                    <ul>
+                        <li><code>SMTP_SERVER</code> = <code>smtp.gmail.com</code></li>
+                        <li><code>SMTP_PORT</code> = <code>587</code></li>
+                        <li><code>SMTP_USERNAME</code> = <code>your-email@gmail.com</code></li>
+                        <li><code>SMTP_PASSWORD</code> = <code>your-app-password</code></li>
+                    </ul>
+                </li>
+                {% elif results.tests|selectattr('status', 'equalto', '❌ FAIL')|list|length > 0 %}
+                <li>Check the error messages above</li>
+                <li>For Gmail: Make sure you're using an <strong>App Password</strong>, not your regular password</li>
+                <li>Enable 2-Step Verification on your Gmail account</li>
+                <li>Generate a new App Password at: <a href="https://myaccount.google.com/apppasswords" target="_blank">Google App Passwords</a></li>
+                {% else %}
+                <li>✅ Email configuration is working correctly!</li>
+                <li>If emails still fail, check Render logs for specific errors</li>
+                {% endif %}
+            </ul>
+        </div>
+
+        <div class="text-center">
+            <a href="{{ url_for('admin_dashboard') }}" class="btn-back">Back to Admin Dashboard</a>
+        </div>
+    </div>
+
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/bootstrap/5.3.0/js/bootstrap.bundle.min.js"></script>
+</body>
+</html>
+
