@@ -2,6 +2,7 @@ from flask import Flask, render_template, request, redirect, url_for, session, f
 from flask_sqlalchemy import SQLAlchemy
 from werkzeug.security import generate_password_hash, check_password_hash
 from werkzeug.utils import secure_filename
+from sqlalchemy import text
 import os
 import uuid
 import base64
@@ -12,10 +13,10 @@ import math
 import random
 import string
 import io
-# Email sending imports removed - email verification module disabled
-# import smtplib
-# from email.mime.text import MIMEText
-# from email.mime.multipart import MIMEMultipart
+# Email sending imports for verification
+import smtplib
+from email.mime.text import MIMEText
+from email.mime.multipart import MIMEMultipart
 from datetime import datetime, timedelta
 from dotenv import load_dotenv
 from PIL import Image, ImageDraw, ImageFont
@@ -59,6 +60,7 @@ class User(db.Model):
     name = db.Column(db.String(100), nullable=False)
     gender = db.Column(db.String(10), nullable=False)
     password = db.Column(db.String(200), nullable=False)
+    verified = db.Column(db.Boolean, default=False, nullable=False)
     health_data = db.relationship('HealthData', backref='user', lazy=True)
 
 class HealthData(db.Model):
@@ -79,6 +81,14 @@ class PasswordReset(db.Model):
     id = db.Column(db.Integer, primary_key=True)
     email = db.Column(db.String(150), nullable=False)
     token = db.Column(db.String(100), unique=True, nullable=False)
+    created_at = db.Column(db.DateTime, default=datetime.utcnow)
+    expires_at = db.Column(db.DateTime, nullable=False)
+    used = db.Column(db.Boolean, default=False, nullable=False)
+
+class EmailVerification(db.Model):
+    id = db.Column(db.Integer, primary_key=True)
+    email = db.Column(db.String(150), nullable=False)
+    otp = db.Column(db.String(6), nullable=False)  # 6-digit OTP code
     created_at = db.Column(db.DateTime, default=datetime.utcnow)
     expires_at = db.Column(db.DateTime, nullable=False)
     used = db.Column(db.Boolean, default=False, nullable=False)
@@ -136,6 +146,69 @@ def generate_captcha():
 def generate_reset_token():
     """Generate a secure random token for password reset"""
     return ''.join(random.choices(string.ascii_letters + string.digits, k=32))
+
+def generate_verification_token():
+    """Generate a secure random token for email verification (legacy - not used)"""
+    return ''.join(random.choices(string.ascii_letters + string.digits, k=32))
+
+def generate_otp():
+    """Generate a 6-digit OTP code for email verification"""
+    return ''.join(random.choices(string.digits, k=6))
+
+def send_verification_email(email, otp_code):
+    """Send verification email with OTP code"""
+    try:
+        smtp_server = os.getenv('SMTP_SERVER', 'smtp.gmail.com')
+        smtp_port = int(os.getenv('SMTP_PORT', '587'))
+        smtp_username = os.getenv('SMTP_USERNAME')
+        smtp_password = os.getenv('SMTP_PASSWORD')
+        
+        # If email not configured, return False (will show OTP on screen)
+        if not smtp_username or not smtp_password:
+            print(f"⚠️  Email not configured. OTP for {email}: {otp_code}")
+            print(f"   Please enter this OTP code to verify your email.")
+            return False
+        
+        # Create email message
+        msg = MIMEMultipart()
+        msg['From'] = smtp_username
+        msg['To'] = email
+        msg['Subject'] = 'Verify Your Email - Food Insight'
+        
+        body = f"""
+        Hello,
+        
+        Thank you for registering with Food Insight!
+        
+        Your email verification code is: {otp_code}
+        
+        Please enter this code on the verification page to verify your email address.
+        
+        This code will expire in 10 minutes.
+        
+        If you did not create this account, please ignore this email.
+        
+        Best regards,
+        Food Insight Team
+        """
+        
+        msg.attach(MIMEText(body, 'plain'))
+        
+        # Send email
+        server = smtplib.SMTP(smtp_server, smtp_port)
+        server.starttls()
+        server.login(smtp_username, smtp_password)
+        server.send_message(msg)
+        server.quit()
+        
+        print(f"✓ Verification OTP sent to {email}")
+        return True
+        
+    except Exception as e:
+        print(f"⚠️  Error sending verification email: {e}")
+        print(f"   OTP for {email}: {otp_code}")
+        print(f"   Please enter this OTP code to verify your email.")
+        return False
 
 def analyze_food_with_gemini(image_path, user_data):
     """
@@ -311,30 +384,156 @@ def register():
             session['register_captcha_code'] = code.upper()
             return render_template('register.html', captcha_image=f'data:image/png;base64,{img_base64}')
 
-        # Create user directly (no email verification required)
+        # Create user (unverified by default)
         hashed_password = generate_password_hash(password)
         new_user = User(
             email=email, 
             number=number, 
             name=name, 
             gender=gender, 
-            password=hashed_password
+            password=hashed_password,
+            verified=False
         )
         db.session.add(new_user)
         db.session.commit()
         
+        # Generate OTP code
+        otp_code = generate_otp()
+        expires_at = datetime.utcnow() + timedelta(minutes=10)  # OTP valid for 10 minutes
+        
+        # Delete old verification OTPs for this email
+        EmailVerification.query.filter_by(email=email).delete()
+        
+        # Create new verification OTP
+        verification = EmailVerification(
+            email=email,
+            otp=otp_code,
+            expires_at=expires_at
+        )
+        db.session.add(verification)
+        db.session.commit()
+        
+        # Send verification email with OTP
+        email_sent = send_verification_email(email, otp_code)
+        
         # Clear CAPTCHA from session after successful registration
         session.pop('register_captcha_code', None)
         
-        flash('Registration successful! You can now login.')
-        return redirect(url_for('login'))
+        # Store email in session for OTP verification page
+        session['verification_email'] = email
+        
+        if email_sent:
+            flash('Registration successful! Please check your email for the OTP code.')
+        else:
+            flash(f'Registration successful! Your OTP code is: {otp_code} (valid for 10 minutes)')
+        
+        return redirect(url_for('verify_otp'))
     
     # GET request - generate CAPTCHA
     code, img_base64 = generate_captcha()
     session['register_captcha_code'] = code.upper()
     return render_template('register.html', captcha_image=f'data:image/png;base64,{img_base64}')
 
-# Email verification routes removed - OTP verification module disabled
+@app.route('/verify_otp', methods=['GET', 'POST'])
+def verify_otp():
+    """Verify user email with OTP code"""
+    # Get email from session or form
+    email = session.get('verification_email') or request.form.get('email', '').strip()
+    
+    if not email:
+        flash('Please register first or enter your email address.')
+        return redirect(url_for('register'))
+    
+    if request.method == 'POST':
+        otp_input = request.form.get('otp', '').strip()
+        
+        if not otp_input or len(otp_input) != 6:
+            flash('Please enter a valid 6-digit OTP code.')
+            return render_template('verify_otp.html', email=email)
+        
+        # Find verification record
+        verification = EmailVerification.query.filter_by(
+            email=email, 
+            otp=otp_input, 
+            used=False
+        ).first()
+        
+        if not verification:
+            flash('Invalid OTP code. Please try again.')
+            return render_template('verify_otp.html', email=email)
+        
+        # Check if OTP has expired
+        if datetime.utcnow() > verification.expires_at:
+            flash('OTP code has expired. Please request a new one.')
+            db.session.delete(verification)
+            db.session.commit()
+            return render_template('verify_otp.html', email=email)
+        
+        # Find user and verify email
+        user = User.query.filter_by(email=email).first()
+        if user:
+            user.verified = True
+            verification.used = True
+            db.session.commit()
+            
+            # Clear verification email from session
+            session.pop('verification_email', None)
+            
+            flash('Email verified successfully! You can now login.')
+            return redirect(url_for('login'))
+        else:
+            flash('User not found.')
+            return redirect(url_for('register'))
+    
+    # GET request - show OTP verification page
+    return render_template('verify_otp.html', email=email)
+
+@app.route('/resend_otp', methods=['GET', 'POST'])
+def resend_otp():
+    """Resend verification OTP"""
+    if request.method == 'POST':
+        email = request.form.get('email', '').strip()
+        user = User.query.filter_by(email=email).first()
+        
+        if not user:
+            # Don't reveal if email exists (security)
+            flash('If an account with that email exists and is not verified, a verification OTP has been sent.')
+            return redirect(url_for('login'))
+        
+        if user.verified:
+            flash('This email is already verified. You can login.')
+            return redirect(url_for('login'))
+        
+        # Generate new OTP code
+        otp_code = generate_otp()
+        expires_at = datetime.utcnow() + timedelta(minutes=10)  # OTP valid for 10 minutes
+        
+        # Delete old verification OTPs for this email
+        EmailVerification.query.filter_by(email=email).delete()
+        
+        # Create new verification OTP
+        verification = EmailVerification(
+            email=email,
+            otp=otp_code,
+            expires_at=expires_at
+        )
+        db.session.add(verification)
+        db.session.commit()
+        
+        # Send verification email with OTP
+        email_sent = send_verification_email(email, otp_code)
+        
+        # Store email in session for OTP verification page
+        session['verification_email'] = email
+        
+        if email_sent:
+            flash('Verification OTP sent! Please check your email.')
+        else:
+            flash(f'Your OTP code is: {otp_code} (valid for 10 minutes)')
+        
+        return redirect(url_for('verify_otp'))
+    
+    return render_template('resend_otp.html')
 
 @app.route('/login', methods=['GET', 'POST'])
 def login():
@@ -344,6 +543,12 @@ def login():
         user = User.query.filter_by(email=email).first()
 
         if user and check_password_hash(user.password, password_input):
+            # Check if email is verified
+            if not user.verified:
+                session['verification_email'] = email
+                flash('Please verify your email before logging in. Check your inbox for OTP or <a href="' + url_for('resend_otp') + '">resend OTP</a>.')
+                return redirect(url_for('verify_otp'))
+            
             session['user_id'] = user.id
             session['user_name'] = user.name
             session['user_gender'] = user.gender
@@ -554,7 +759,7 @@ def create_tables():
         inspector = db.inspect(db.engine)
         existing_tables = inspector.get_table_names()
         
-        required_tables = ['user', 'health_data', 'password_reset']
+        required_tables = ['user', 'health_data', 'password_reset', 'email_verification']
         missing_tables = [t for t in required_tables if t not in existing_tables]
         
         if missing_tables:
@@ -600,10 +805,65 @@ def migrate_database():
             print("User table doesn't exist. It should have been created by db.create_all()")
             return
         
-        # Email verification removed - no migration needed for 'verified' column
+        # Check if 'verified' column exists in user table
+        try:
+            columns = [col['name'] for col in inspector.get_columns('user')]
+            if 'verified' not in columns:
+                print("Adding 'verified' column to user table...")
+                # For SQLite, we need to use ALTER TABLE
+                if 'sqlite' in app.config['SQLALCHEMY_DATABASE_URI']:
+                    with db.engine.begin() as conn:
+                        conn.execute(text('ALTER TABLE user ADD COLUMN verified BOOLEAN DEFAULT 0'))
+                        # Mark all existing users as verified
+                        conn.execute(text('UPDATE user SET verified = 1 WHERE verified IS NULL'))
+                    print("✓ 'verified' column added to user table.")
+                else:
+                    # For PostgreSQL, use ALTER TABLE
+                    with db.engine.begin() as conn:
+                        conn.execute(text('ALTER TABLE "user" ADD COLUMN IF NOT EXISTS verified BOOLEAN DEFAULT FALSE'))
+                        conn.execute(text('UPDATE "user" SET verified = TRUE WHERE verified IS NULL'))
+                    print("✓ 'verified' column added to user table.")
+        except Exception as e:
+            print(f"Note: Could not check/add 'verified' column: {e}")
+            print("This is okay if the column already exists.")
+        
+        # Check if email_verification table needs migration (token -> otp)
+        if 'email_verification' in tables:
+            try:
+                columns = [col['name'] for col in inspector.get_columns('email_verification')]
+                if 'token' in columns and 'otp' not in columns:
+                    print("Migrating email_verification table: token -> otp...")
+                    # For SQLite, we need to recreate the table
+                    if 'sqlite' in app.config['SQLALCHEMY_DATABASE_URI']:
+                        # SQLite doesn't support DROP COLUMN, so we'll recreate the table
+                        with db.engine.begin() as conn:
+                            # Create new table with otp column
+                            conn.execute(text('''
+                                CREATE TABLE email_verification_new (
+                                    id INTEGER PRIMARY KEY,
+                                    email VARCHAR(150) NOT NULL,
+                                    otp VARCHAR(6) NOT NULL,
+                                    created_at DATETIME,
+                                    expires_at DATETIME NOT NULL,
+                                    used BOOLEAN NOT NULL DEFAULT 0
+                                )
+                            '''))
+                            # Copy data (if any) - we'll just drop old tokens
+                            conn.execute(text('DROP TABLE email_verification'))
+                            conn.execute(text('ALTER TABLE email_verification_new RENAME TO email_verification'))
+                        print("✓ email_verification table migrated to use OTP.")
+                    else:
+                        # For PostgreSQL, we can add the column and migrate data
+                        with db.engine.begin() as conn:
+                            conn.execute(text('ALTER TABLE email_verification ADD COLUMN IF NOT EXISTS otp VARCHAR(6)'))
+                            # Drop old token column (if safe)
+                            # Note: We'll keep both columns for safety, old data will be ignored
+                        print("✓ email_verification table updated (otp column added).")
+            except Exception as e:
+                print(f"Note: Could not migrate email_verification table: {e}")
+                print("This is okay if the table is already using OTP.")
+        
         print("✓ Database schema is up to date.")
-            
-        # OTP table removed - email verification module disabled
             
     except Exception as e:
         # If inspector fails, try a different approach
@@ -632,7 +892,7 @@ def init_database():
             try:
                 inspector = db.inspect(db.engine)
                 tables = inspector.get_table_names()
-                required_tables = ['user', 'health_data', 'password_reset']
+                required_tables = ['user', 'health_data', 'password_reset', 'email_verification']
                 
                 missing_tables = [t for t in required_tables if t not in tables]
                 if missing_tables:

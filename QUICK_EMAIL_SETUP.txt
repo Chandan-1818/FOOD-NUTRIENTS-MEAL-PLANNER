@@ -1,0 +1,56 @@
+═══════════════════════════════════════════════════════════════
+  QUICK EMAIL SETUP FOR OTP VERIFICATION
+═══════════════════════════════════════════════════════════════
+
+STEP 1: Get Gmail App Password
+───────────────────────────────────────────────────────────────
+
+1. Go to: https://myaccount.google.com/security
+2. Enable "2-Step Verification" (if not already enabled)
+3. Go to: https://myaccount.google.com/apppasswords
+4. Select:
+   - App: Mail
+   - Device: Other (Custom name)
+   - Name: Food Insight
+5. Click "Generate"
+6. Copy the 16-character password (remove spaces)
+   Example: abcd efgh ijkl mnop → abcdefghijklmnop
+
+STEP 2: Update .env File
+───────────────────────────────────────────────────────────────
+
+Open the .env file and update these lines:
+
+SMTP_USERNAME=your_actual_email@gmail.com
+SMTP_PASSWORD=your_16_character_app_password
+
+Replace:
+- your_actual_email@gmail.com → Your Gmail address
+- your_16_character_app_password → The App Password from Step 1
+
+IMPORTANT: Use App Password, NOT your regular Gmail password!
+
+STEP 3: Test Email
+───────────────────────────────────────────────────────────────
+
+Run this command to test:
+  python test_email.py
+
+Enter your email address when prompted.
+If you receive the test email, configuration is working!
+
+═══════════════════════════════════════════════════════════════
+  TROUBLESHOOTING
+═══════════════════════════════════════════════════════════════
+
+❌ Authentication Failed?
+   → Make sure you're using App Password (not regular password)
+   → Verify 2-Step Verification is enabled
+
+❌ Email Not Received?
+   → Check spam/junk folder
+   → Verify email address is correct
+   → Check internet connection
+
+Need help? See EMAIL_SETUP_GUIDE.md for detailed instructions.
+
