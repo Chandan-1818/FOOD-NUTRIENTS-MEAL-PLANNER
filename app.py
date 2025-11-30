@@ -287,16 +287,29 @@ def home():
 @app.route('/register', methods=['GET', 'POST'])
 def register():
     if request.method == 'POST':
-        email = request.form['email']
-        number = request.form['number']
-        name = request.form['name']
-        gender = request.form['gender']
-        password = request.form['password']
+        email = request.form.get('email', '').strip()
+        number = request.form.get('number', '').strip()
+        name = request.form.get('name', '').strip()
+        gender = request.form.get('gender', '').strip()
+        password = request.form.get('password', '').strip()
+        captcha_input = request.form.get('captcha', '').strip().upper()
+        captcha_code = session.get('register_captcha_code', '').upper()
+        
+        # Verify CAPTCHA
+        if not captcha_code or captcha_input != captcha_code:
+            flash('Invalid CAPTCHA code. Please try again.')
+            # Generate new CAPTCHA
+            code, img_base64 = generate_captcha()
+            session['register_captcha_code'] = code.upper()
+            return render_template('register.html', captcha_image=f'data:image/png;base64,{img_base64}')
 
         existing_user = User.query.filter_by(email=email).first()
         if existing_user:
             flash('Email already registered.')
-            return redirect(url_for('login'))
+            # Generate new CAPTCHA for retry
+            code, img_base64 = generate_captcha()
+            session['register_captcha_code'] = code.upper()
+            return render_template('register.html', captcha_image=f'data:image/png;base64,{img_base64}')
 
         # Create user directly (no email verification required)
         hashed_password = generate_password_hash(password)
@@ -310,10 +323,16 @@ def register():
         db.session.add(new_user)
         db.session.commit()
         
+        # Clear CAPTCHA from session after successful registration
+        session.pop('register_captcha_code', None)
+        
         flash('Registration successful! You can now login.')
         return redirect(url_for('login'))
     
-    return render_template('register.html')
+    # GET request - generate CAPTCHA
+    code, img_base64 = generate_captcha()
+    session['register_captcha_code'] = code.upper()
+    return render_template('register.html', captcha_image=f'data:image/png;base64,{img_base64}')
 
 # Email verification routes removed - OTP verification module disabled
 
@@ -335,9 +354,16 @@ def login():
 
 @app.route('/captcha')
 def captcha():
-    """Generate and return CAPTCHA image"""
+    """Generate and return CAPTCHA image for forgot password"""
     code, img_base64 = generate_captcha()
     session['captcha_code'] = code.upper()  # Store in session (case-insensitive comparison)
+    return f'data:image/png;base64,{img_base64}'
+
+@app.route('/captcha/register')
+def captcha_register():
+    """Generate and return CAPTCHA image for registration"""
+    code, img_base64 = generate_captcha()
+    session['register_captcha_code'] = code.upper()  # Store in session (case-insensitive comparison)
     return f'data:image/png;base64,{img_base64}'
 
 @app.route('/forgot_password', methods=['GET', 'POST'])

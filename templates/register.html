@@ -39,6 +39,32 @@
             text-align: center;
             margin-top: 20px;
         }
+        .captcha-container {
+            display: flex;
+            align-items: center;
+            gap: 10px;
+            margin-bottom: 15px;
+        }
+        .captcha-image {
+            border: 2px solid #ddd;
+            border-radius: 5px;
+            padding: 5px;
+            background-color: #f8f9fa;
+            cursor: pointer;
+        }
+        .captcha-refresh {
+            cursor: pointer;
+            color: #4e73df;
+            text-decoration: none;
+            font-size: 14px;
+        }
+        .captcha-refresh:hover {
+            text-decoration: underline;
+        }
+        .required-field::after {
+            content: " *";
+            color: red;
+        }
     </style>
 </head>
 <body>
@@ -55,33 +81,44 @@
         
         <form action="{{ url_for('register') }}" method="post">
             <div class="mb-3">
-                <label for="name" class="form-label">Full Name</label>
+                <label for="name" class="form-label required-field">Full Name</label>
                 <input type="text" class="form-control" id="name" name="name" required>
             </div>
             
             <div class="mb-3">
-                <label for="email" class="form-label">Email Address</label>
+                <label for="email" class="form-label required-field">Email Address</label>
                 <input type="email" class="form-control" id="email" name="email" required>
             </div>
             
             <div class="mb-3">
-                <label for="number" class="form-label">Phone Number</label>
+                <label for="number" class="form-label required-field">Phone Number</label>
                 <input type="tel" class="form-control" id="number" name="number" required>
             </div>
             
             <div class="mb-3">
-                <label for="gender" class="form-label">Gender</label>
+                <label for="gender" class="form-label required-field">Gender</label>
                 <select class="form-select" id="gender" name="gender" required>
                     <option value="" selected disabled>Select your gender</option>
                     <option value="Male">Male</option>
                     <option value="Female">Female</option>
-                    <option value="Other">Other</option>
                 </select>
             </div>
             
             <div class="mb-3">
-                <label for="password" class="form-label">Password</label>
+                <label for="password" class="form-label required-field">Password</label>
                 <input type="password" class="form-control" id="password" name="password" required>
+            </div>
+            
+            <div class="mb-3">
+                <label for="captcha" class="form-label required-field">Enter CAPTCHA Code</label>
+                <div class="captcha-container">
+                    <img src="{{ captcha_image }}" alt="CAPTCHA" class="captcha-image" id="captcha-img" onclick="refreshCaptcha()">
+                    <a href="#" class="captcha-refresh" onclick="refreshCaptcha(); return false;">🔄 Refresh</a>
+                </div>
+                <input type="text" class="form-control mt-2" id="captcha" name="captcha" 
+                       placeholder="Enter the code shown above" required autocomplete="off" 
+                       style="text-transform: uppercase;">
+                <small class="form-text text-muted">Click on the image or refresh button to get a new code</small>
             </div>
             
             <button type="submit" class="btn btn-primary">Register</button>
@@ -93,5 +130,19 @@
     </div>
     
     <script src="https://cdnjs.cloudflare.com/ajax/libs/bootstrap/5.3.0/js/bootstrap.bundle.min.js"></script>
+    <script>
+        function refreshCaptcha() {
+            const img = document.getElementById('captcha-img');
+            const timestamp = new Date().getTime();
+            img.src = "{{ url_for('captcha_register') }}?t=" + timestamp;
+            document.getElementById('captcha').value = '';
+            document.getElementById('captcha').focus();
+        }
+        
+        // Auto-uppercase CAPTCHA input
+        document.getElementById('captcha').addEventListener('input', function(e) {
+            this.value = this.value.toUpperCase();
+        });
+    </script>
 </body>
 </html>
