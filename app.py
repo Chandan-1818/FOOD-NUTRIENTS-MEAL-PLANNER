@@ -163,10 +163,10 @@ def send_verification_email(email, otp_code):
         smtp_username = os.getenv('SMTP_USERNAME')
         smtp_password = os.getenv('SMTP_PASSWORD')
         
-        # If email not configured, return False (will show OTP on screen)
+        # If email not configured, return False
         if not smtp_username or not smtp_password:
-            print(f"⚠️  Email not configured. OTP for {email}: {otp_code}")
-            print(f"   Please enter this OTP code to verify your email.")
+            print(f"⚠️  Email not configured. Cannot send OTP to {email}")
+            print(f"   Please configure SMTP settings in .env file")
             return False
         
         # Create email message
@@ -204,10 +204,34 @@ def send_verification_email(email, otp_code):
         print(f"✓ Verification OTP sent to {email}")
         return True
         
+    except smtplib.SMTPAuthenticationError as e:
+        error_msg = f"Email authentication failed: {str(e)}"
+        print(f"❌ {error_msg}")
+        print(f"   Please check SMTP_USERNAME and SMTP_PASSWORD in .env file")
+        print(f"   Make sure you're using an App Password, not your regular password")
+        import traceback
+        traceback.print_exc()
+        return False
+    except smtplib.SMTPRecipientsRefused as e:
+        error_msg = f"Recipient email rejected: {str(e)}"
+        print(f"❌ {error_msg}")
+        print(f"   Error: {e}")
+        import traceback
+        traceback.print_exc()
+        return False
+    except smtplib.SMTPServerDisconnected as e:
+        error_msg = f"Server disconnected: {str(e)}"
+        print(f"❌ {error_msg}")
+        print(f"   Check SMTP server and port settings")
+        import traceback
+        traceback.print_exc()
+        return False
     except Exception as e:
-        print(f"⚠️  Error sending verification email: {e}")
-        print(f"   OTP for {email}: {otp_code}")
-        print(f"   Please enter this OTP code to verify your email.")
+        error_msg = f"Error sending email: {str(e)}"
+        print(f"❌ {error_msg}")
+        print(f"   Error type: {type(e).__name__}")
+        import traceback
+        traceback.print_exc()
         return False
 
 def analyze_food_with_gemini(image_path, user_data):
@@ -423,9 +447,11 @@ def register():
         session['verification_email'] = email
         
         if email_sent:
-            flash('Registration successful! Please check your email for the OTP code.')
+            flash('Registration successful! Please check your email for the OTP code. If you don\'t see it, check your spam folder.')
         else:
-            flash(f'Registration successful! Your OTP code is: {otp_code} (valid for 10 minutes)')
+            flash('Registration successful! However, email sending failed. Please check your email configuration or contact support.')
+            # Log OTP to console for debugging (not shown to user)
+            print(f"⚠️  OTP for {email} (email failed): {otp_code}")
         
         return redirect(url_for('verify_otp'))
     
@@ -527,9 +553,11 @@ def resend_otp():
         session['verification_email'] = email
         
         if email_sent:
-            flash('Verification OTP sent! Please check your email.')
+            flash('Verification OTP sent! Please check your email. If you don\'t see it, check your spam folder.')
         else:
-            flash(f'Your OTP code is: {otp_code} (valid for 10 minutes)')
+            flash('OTP sending failed. Please check your email configuration or contact support.')
+            # Log OTP to console for debugging (not shown to user)
+            print(f"⚠️  OTP for {email} (email failed): {otp_code}")
         
         return redirect(url_for('verify_otp'))
     

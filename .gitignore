@@ -36,3 +36,6 @@ uploads/*
 # Logs
 *.log
 
+# Keep Project Report - DO NOT IGNORE
+!Project Report(NRS).pdf
+
