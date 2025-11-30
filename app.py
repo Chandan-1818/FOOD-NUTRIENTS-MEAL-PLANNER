@@ -10,11 +10,15 @@ import json
 import re
 import math
 import random
-import smtplib
-from email.mime.text import MIMEText
-from email.mime.multipart import MIMEMultipart
+import string
+import io
+# Email sending imports removed - email verification module disabled
+# import smtplib
+# from email.mime.text import MIMEText
+# from email.mime.multipart import MIMEMultipart
 from datetime import datetime, timedelta
 from dotenv import load_dotenv
+from PIL import Image, ImageDraw, ImageFont
 
 # Load environment variables from .env file
 load_dotenv()
@@ -55,16 +59,7 @@ class User(db.Model):
     name = db.Column(db.String(100), nullable=False)
     gender = db.Column(db.String(10), nullable=False)
     password = db.Column(db.String(200), nullable=False)
-    verified = db.Column(db.Boolean, default=False, nullable=False)
     health_data = db.relationship('HealthData', backref='user', lazy=True)
-
-class OTP(db.Model):
-    id = db.Column(db.Integer, primary_key=True)
-    email = db.Column(db.String(150), nullable=False)
-    otp_code = db.Column(db.String(6), nullable=False)
-    created_at = db.Column(db.DateTime, default=datetime.utcnow)
-    expires_at = db.Column(db.DateTime, nullable=False)
-    verified = db.Column(db.Boolean, default=False, nullable=False)
 
 class HealthData(db.Model):
     id = db.Column(db.Integer, primary_key=True)
@@ -80,6 +75,14 @@ class HealthData(db.Model):
     diet_plan = db.Column(db.Text, nullable=True)
     recommendation = db.Column(db.Text, nullable=True)
 
+class PasswordReset(db.Model):
+    id = db.Column(db.Integer, primary_key=True)
+    email = db.Column(db.String(150), nullable=False)
+    token = db.Column(db.String(100), unique=True, nullable=False)
+    created_at = db.Column(db.DateTime, default=datetime.utcnow)
+    expires_at = db.Column(db.DateTime, nullable=False)
+    used = db.Column(db.Boolean, default=False, nullable=False)
+
 # Helper functions
 def allowed_file(filename):
     return '.' in filename and filename.rsplit('.', 1)[1].lower() in ALLOWED_EXTENSIONS
@@ -90,206 +93,49 @@ def calculate_bmi(weight, height):
     bmi = weight / (height_m * height_m)
     return round(bmi, 2)
 
-def generate_otp():
-    """Generate a 6-digit OTP"""
-    return str(random.randint(100000, 999999))
-
-def get_smtp_config_for_email(email_address):
-    """
-    Dynamically determine SMTP configuration based on email provider.
-    Returns SMTP server and port for the email domain.
-    """
-    email_domain = email_address.split('@')[1].lower() if '@' in email_address else ''
+# CAPTCHA generation function
+def generate_captcha():
+    """Generate a simple CAPTCHA image and return the code and image data"""
+    # Generate random 5-character code (letters and numbers)
+    code = ''.join(random.choices(string.ascii_uppercase + string.digits, k=5))
     
-    # Common email provider SMTP settings
-    smtp_configs = {
-        'gmail.com': {'server': 'smtp.gmail.com', 'port': 587},
-        'outlook.com': {'server': 'smtp-mail.outlook.com', 'port': 587},
-        'hotmail.com': {'server': 'smtp-mail.outlook.com', 'port': 587},
-        'live.com': {'server': 'smtp-mail.outlook.com', 'port': 587},
-        'yahoo.com': {'server': 'smtp.mail.yahoo.com', 'port': 587},
-        'yahoo.co.uk': {'server': 'smtp.mail.yahoo.co.uk', 'port': 587},
-        'aol.com': {'server': 'smtp.aol.com', 'port': 587},
-        'icloud.com': {'server': 'smtp.mail.me.com', 'port': 587},
-        'mail.com': {'server': 'smtp.mail.com', 'port': 587},
-    }
+    # Create image
+    width, height = 150, 50
+    image = Image.new('RGB', (width, height), color='white')
+    draw = ImageDraw.Draw(image)
     
-    # Return config for known provider, or use default Gmail settings
-    return smtp_configs.get(email_domain, {'server': 'smtp.gmail.com', 'port': 587})
-
-def validate_email(email_address):
-    """Validate email address format"""
-    import re
-    pattern = r'^[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}$'
-    return re.match(pattern, email_address) is not None
-
-def send_otp_email(email, otp_code, user_name=None):
-    """
-    Send OTP to user's email address dynamically.
-    Works with any email address - Gmail, Outlook, Yahoo, etc.
-    
-    IMPORTANT: This function ONLY sends email via SMTP.
-    It NEVER returns email content - only returns True/False for success/failure.
-    
-    Args:
-        email: Recipient email address (dynamic - any email)
-        otp_code: 6-digit OTP code
-        user_name: Optional user name for personalization
-    
-    Returns:
-        bool: True if email sent successfully, False otherwise
-    """
-    # CRITICAL: Never return email content - only return boolean
-    email_body_html = None  # Keep email content local, never return it
-    
+    # Try to use a font, fallback to default if not available
     try:
-        # Validate email format
-        if not validate_email(email):
-            print(f"❌ Invalid email format: {email}")
-            return False
-        
-        # Get SMTP configuration (can be customized per email provider)
-        # For now, we use a single SMTP account to send to all recipients
-        SMTP_SERVER = os.getenv('SMTP_SERVER', 'smtp.gmail.com')
-        SMTP_PORT = int(os.getenv('SMTP_PORT', '587'))
-        SMTP_USERNAME = os.getenv('SMTP_USERNAME', '')
-        SMTP_PASSWORD = os.getenv('SMTP_PASSWORD', '')
-        
-        # Auto-detect SMTP settings based on recipient email (optional feature)
-        # Uncomment below to use provider-specific settings
-        # provider_config = get_smtp_config_for_email(email)
-        # SMTP_SERVER = provider_config['server']
-        # SMTP_PORT = provider_config['port']
-        
-        # Check if email is configured
-        if not SMTP_USERNAME or SMTP_USERNAME == 'your_email@gmail.com' or not SMTP_PASSWORD or SMTP_PASSWORD == 'your_app_password':
-            print("\n" + "="*60)
-            print("⚠️  EMAIL NOT CONFIGURED - OTP will be shown on screen")
-            print("="*60)
-            print(f"Recipient: {email}")
-            print(f"OTP Code: {otp_code}")
-            print("\nTo enable email sending, create a .env file with:")
-            print("  SMTP_SERVER=smtp.gmail.com")
-            print("  SMTP_PORT=587")
-            print("  SMTP_USERNAME=your_email@gmail.com")
-            print("  SMTP_PASSWORD=your_app_password")
-            print("\nFor Gmail: Use App Password (not regular password)")
-            print("  Go to: Google Account > Security > 2-Step Verification > App passwords")
-            print("="*60 + "\n")
-            # CRITICAL: Return False, never return email content
-            return False
-        
-        # Create message object
-        msg = MIMEMultipart()
-        msg['From'] = f"Health Food Monitor <{SMTP_USERNAME}>"
-        msg['To'] = email
-        msg['Subject'] = 'Email Verification OTP - Health Food Monitor'
-        
-        # Personalize greeting
-        greeting = f"Hello {user_name}!" if user_name else "Hello!"
-        
-        # Build email body HTML (stored in local variable, never returned)
-        email_body_html = f"""
-        <html>
-            <body style="font-family: Arial, sans-serif; line-height: 1.6; color: #333; margin: 0; padding: 0;">
-                <div style="max-width: 600px; margin: 0 auto; padding: 20px; border: 1px solid #ddd; border-radius: 10px; background-color: #ffffff;">
-                    <h2 style="color: #4e73df; margin-top: 0;">Email Verification</h2>
-                    <p>{greeting}</p>
-                    <p>Thank you for registering with Health Food Monitor!</p>
-                    <div style="background-color: #f8f9fa; padding: 20px; border-radius: 5px; text-align: center; margin: 20px 0; border: 2px solid #4e73df;">
-                        <p style="margin: 0 0 10px 0; font-size: 14px; color: #666; font-weight: 600;">Your verification code is:</p>
-                        <p style="font-size: 36px; font-weight: bold; color: #4e73df; margin: 10px 0; letter-spacing: 8px; font-family: 'Courier New', monospace;">{otp_code}</p>
-                    </div>
-                    <p style="color: #666; font-size: 14px; margin-bottom: 5px;">⏰ This code will expire in <strong>10 minutes</strong>.</p>
-                    <p style="color: #666; font-size: 14px; margin-top: 5px;">If you didn't request this code, please ignore this email.</p>
-                    <hr style="border: none; border-top: 1px solid #eee; margin: 20px 0;">
-                    <p style="color: #999; font-size: 12px; margin: 0;">This is an automated message from Health Food Monitor.</p>
-                </div>
-            </body>
-        </html>
-        """
-        
-        # Attach HTML body to message (NOT returned to browser)
-        msg.attach(MIMEText(email_body_html, 'html'))
-        
-        # CRITICAL: Clear email_body_html reference after attaching (defensive programming)
-        # This ensures it can't accidentally be returned
-        email_body_html = None
-        
-        # Send email
-        print(f"\n{'='*60}")
-        print(f"📧 Sending OTP Email (Dynamic)")
-        print(f"   Recipient: {email}")
-        print(f"   Sender: {SMTP_USERNAME}")
-        print(f"   Server: {SMTP_SERVER}:{SMTP_PORT}")
-        if user_name:
-            print(f"   User: {user_name}")
-        print(f"{'='*60}")
-        
-        server = smtplib.SMTP(SMTP_SERVER, SMTP_PORT, timeout=10)
-        server.starttls()
-        print("✓ TLS connection established")
-        
-        server.login(SMTP_USERNAME, SMTP_PASSWORD)
-        print("✓ Authentication successful")
-        
-        server.send_message(msg)
-        print("✓ Message sent to server")
-        
-        server.quit()
-        print(f"✓ OTP email sent successfully to {email}")
-        print(f"{'='*60}\n")
-        return True
-        
-    except smtplib.SMTPAuthenticationError as e:
-        print(f"\n{'='*60}")
-        print(f"❌ SMTP Authentication Error")
-        print(f"{'='*60}")
-        print(f"Error: {e}")
-        print(f"\nTroubleshooting:")
-        print(f"1. Check SMTP_USERNAME in .env file: {SMTP_USERNAME[:3]}***")
-        print(f"2. For Gmail: Use App Password (not regular password)")
-        print(f"   - Go to: https://myaccount.google.com/apppasswords")
-        print(f"   - Generate app password for 'Mail'")
-        print(f"3. Make sure 2-Step Verification is enabled on your Google account")
-        print(f"4. Remove spaces from app password")
-        print(f"\nOTP for {email}: {otp_code}")
-        print(f"{'='*60}\n")
-        return False
-    except smtplib.SMTPServerDisconnected as e:
-        print(f"\n{'='*60}")
-        print(f"❌ SMTP Connection Error")
-        print(f"{'='*60}")
-        print(f"Error: {e}")
-        print(f"\nTroubleshooting:")
-        print(f"1. Check your internet connection")
-        print(f"2. Verify SMTP_SERVER is correct: {SMTP_SERVER}")
-        print(f"3. Check firewall/antivirus settings")
-        print(f"4. Try different SMTP_PORT (587 or 465)")
-        print(f"\nOTP for {email}: {otp_code}")
-        print(f"{'='*60}\n")
-        return False
-    except smtplib.SMTPException as e:
-        print(f"\n{'='*60}")
-        print(f"❌ SMTP Error")
-        print(f"{'='*60}")
-        print(f"Error: {e}")
-        print(f"Error Type: {type(e).__name__}")
-        print(f"\nOTP for {email}: {otp_code}")
-        print(f"{'='*60}\n")
-        return False
-    except Exception as e:
-        print(f"\n{'='*60}")
-        print(f"❌ Unexpected Error")
-        print(f"{'='*60}")
-        print(f"Error: {e}")
-        print(f"Error Type: {type(e).__name__}")
-        import traceback
-        print(f"\nTraceback:")
-        traceback.print_exc()
-        print(f"\nOTP for {email}: {otp_code}")
-        print(f"{'='*60}\n")
-        return False
+        font = ImageFont.truetype("arial.ttf", 24)
+    except:
+        try:
+            font = ImageFont.truetype("/usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf", 24)
+        except:
+            font = ImageFont.load_default()
+    
+    # Draw text with some noise
+    for i, char in enumerate(code):
+        x = 20 + i * 25 + random.randint(-5, 5)
+        y = 10 + random.randint(-5, 5)
+        draw.text((x, y), char, fill=(random.randint(0, 100), random.randint(0, 100), random.randint(0, 100)), font=font)
+    
+    # Add some noise lines
+    for _ in range(5):
+        draw.line([(random.randint(0, width), random.randint(0, height)),
+                   (random.randint(0, width), random.randint(0, height))],
+                  fill=(200, 200, 200), width=1)
+    
+    # Convert to base64 string
+    img_buffer = io.BytesIO()
+    image.save(img_buffer, format='PNG')
+    img_buffer.seek(0)
+    img_base64 = base64.b64encode(img_buffer.getvalue()).decode()
+    
+    return code, img_base64
+
+def generate_reset_token():
+    """Generate a secure random token for password reset"""
+    return ''.join(random.choices(string.ascii_letters + string.digits, k=32))
 
 def analyze_food_with_gemini(image_path, user_data):
     """
@@ -449,159 +295,27 @@ def register():
 
         existing_user = User.query.filter_by(email=email).first()
         if existing_user:
-            if existing_user.verified:
-                flash('Email already registered.')
-                return redirect(url_for('login'))
-            else:
-                # User exists but not verified, delete old user and OTPs
-                OTP.query.filter_by(email=email).delete()
-                db.session.delete(existing_user)
-                db.session.commit()
+            flash('Email already registered.')
+            return redirect(url_for('login'))
 
-        # Generate OTP
-        otp_code = generate_otp()
-        expires_at = datetime.utcnow() + timedelta(minutes=10)
-        
-        # Delete any existing OTPs for this email
-        OTP.query.filter_by(email=email).delete()
-        
-        # Create new OTP record
-        new_otp = OTP(
-            email=email,
-            otp_code=otp_code,
-            expires_at=expires_at
-        )
-        db.session.add(new_otp)
-        
-        # Create user (unverified)
+        # Create user directly (no email verification required)
         hashed_password = generate_password_hash(password)
         new_user = User(
             email=email, 
             number=number, 
             name=name, 
             gender=gender, 
-            password=hashed_password,
-            verified=False
+            password=hashed_password
         )
         db.session.add(new_user)
         db.session.commit()
         
-        # Send OTP email to user's email address (dynamic - works with any email)
-        email_sent = send_otp_email(email, otp_code, user_name=name)
-        if email_sent:
-            flash('Registration successful! Please check your email for the OTP verification code.')
-        else:
-            flash('Registration successful! Email not configured - OTP will be shown on verification page.')
-            # Store OTP in session to display on verification page if email fails
-            session['display_otp'] = otp_code
-        
-        # Store email in session for verification
-        session['pending_email'] = email
-        return redirect(url_for('verify_otp'))
+        flash('Registration successful! You can now login.')
+        return redirect(url_for('login'))
     
     return render_template('register.html')
 
-@app.route('/verify_otp', methods=['GET', 'POST'])
-def verify_otp():
-    if 'pending_email' not in session:
-        flash('Please register first.')
-        return redirect(url_for('register'))
-    
-    email = session['pending_email']
-    
-    # Get OTP to display if email wasn't sent
-    display_otp = session.get('display_otp', None)
-    email_configured = display_otp is None
-    
-    if request.method == 'POST':
-        entered_otp = request.form['otp']
-        
-        # Find the most recent unverified OTP for this email
-        otp_record = OTP.query.filter_by(
-            email=email, 
-            verified=False
-        ).order_by(OTP.created_at.desc()).first()
-        
-        if not otp_record:
-            flash('OTP not found. Please register again.')
-            session.pop('pending_email', None)
-            return redirect(url_for('register'))
-        
-        # Check if OTP has expired
-        if datetime.utcnow() > otp_record.expires_at:
-            flash('OTP has expired. Please request a new one.')
-            display_otp = session.get('display_otp', None)
-            email_configured = display_otp is None
-            return render_template('verify_otp.html', email=email, display_otp=display_otp, email_configured=email_configured)
-        
-        # Verify OTP
-        if otp_record.otp_code == entered_otp:
-            # Mark OTP as verified
-            otp_record.verified = True
-            
-            # Mark user as verified
-            user = User.query.filter_by(email=email).first()
-            if user:
-                user.verified = True
-                db.session.commit()
-                
-                # Clean up session
-                session.pop('pending_email', None)
-                session.pop('display_otp', None)
-                
-                flash('Email verified successfully! You can now login.')
-                return redirect(url_for('login'))
-            else:
-                flash('User not found. Please register again.')
-                session.pop('pending_email', None)
-                return redirect(url_for('register'))
-        else:
-            flash('Invalid OTP. Please try again.')
-    
-    return render_template('verify_otp.html', email=email, display_otp=display_otp, email_configured=email_configured)
-
-@app.route('/resend_otp', methods=['POST'])
-def resend_otp():
-    if 'pending_email' not in session:
-        flash('Please register first.')
-        return redirect(url_for('register'))
-    
-    email = session['pending_email']
-    
-    # Check if user exists
-    user = User.query.filter_by(email=email).first()
-    if not user:
-        flash('User not found. Please register again.')
-        session.pop('pending_email', None)
-        return redirect(url_for('register'))
-    
-    # Generate new OTP
-    otp_code = generate_otp()
-    expires_at = datetime.utcnow() + timedelta(minutes=10)
-    
-    # Delete old OTPs for this email
-    OTP.query.filter_by(email=email).delete()
-    
-    # Create new OTP record
-    new_otp = OTP(
-        email=email,
-        otp_code=otp_code,
-        expires_at=expires_at
-    )
-    db.session.add(new_otp)
-    db.session.commit()
-    
-    # Send OTP email to user's email address (dynamic - works with any email)
-    user_name = user.name if user else None
-    email_sent = send_otp_email(email, otp_code, user_name=user_name)
-    if email_sent:
-        flash('New OTP has been sent to your email.')
-        session.pop('display_otp', None)  # Remove display OTP if email sent
-    else:
-        flash('New OTP generated. Email not configured - OTP will be shown on verification page.')
-        session['display_otp'] = otp_code  # Store OTP to display
-    
-    return redirect(url_for('verify_otp'))
+# Email verification routes removed - OTP verification module disabled
 
 @app.route('/login', methods=['GET', 'POST'])
 def login():
@@ -611,11 +325,6 @@ def login():
         user = User.query.filter_by(email=email).first()
 
         if user and check_password_hash(user.password, password_input):
-            if not user.verified:
-                flash('Please verify your email first. Check your email for the OTP.')
-                session['pending_email'] = email
-                return redirect(url_for('verify_otp'))
-            
             session['user_id'] = user.id
             session['user_name'] = user.name
             session['user_gender'] = user.gender
@@ -623,6 +332,109 @@ def login():
         else:
             flash('Invalid email or password.')
     return render_template('login.html')
+
+@app.route('/captcha')
+def captcha():
+    """Generate and return CAPTCHA image"""
+    code, img_base64 = generate_captcha()
+    session['captcha_code'] = code.upper()  # Store in session (case-insensitive comparison)
+    return f'data:image/png;base64,{img_base64}'
+
+@app.route('/forgot_password', methods=['GET', 'POST'])
+def forgot_password():
+    """Forgot password page with CAPTCHA verification"""
+    if request.method == 'POST':
+        email = request.form.get('email', '').strip()
+        captcha_input = request.form.get('captcha', '').strip().upper()
+        captcha_code = session.get('captcha_code', '').upper()
+        
+        # Verify CAPTCHA
+        if not captcha_code or captcha_input != captcha_code:
+            flash('Invalid CAPTCHA code. Please try again.')
+            # Generate new CAPTCHA
+            code, img_base64 = generate_captcha()
+            session['captcha_code'] = code.upper()
+            return render_template('forgot_password.html', captcha_image=f'data:image/png;base64,{img_base64}')
+        
+        # Check if user exists
+        user = User.query.filter_by(email=email).first()
+        if not user:
+            flash('If an account with that email exists, a password reset link has been sent.')
+            # Don't reveal if email exists or not (security best practice)
+            code, img_base64 = generate_captcha()
+            session['captcha_code'] = code.upper()
+            return render_template('forgot_password.html', captcha_image=f'data:image/png;base64,{img_base64}')
+        
+        # Generate reset token
+        token = generate_reset_token()
+        expires_at = datetime.utcnow() + timedelta(hours=1)  # Token valid for 1 hour
+        
+        # Delete old reset tokens for this email
+        PasswordReset.query.filter_by(email=email).delete()
+        
+        # Create new reset token
+        reset_token = PasswordReset(
+            email=email,
+            token=token,
+            expires_at=expires_at
+        )
+        db.session.add(reset_token)
+        db.session.commit()
+        
+        # Clear CAPTCHA from session
+        session.pop('captcha_code', None)
+        
+        flash(f'Password reset link has been generated. Please use this link to reset your password: {url_for("reset_password", token=token, _external=True)}')
+        return redirect(url_for('login'))
+    
+    # GET request - generate CAPTCHA
+    code, img_base64 = generate_captcha()
+    session['captcha_code'] = code.upper()
+    return render_template('forgot_password.html', captcha_image=f'data:image/png;base64,{img_base64}')
+
+@app.route('/reset_password/<token>', methods=['GET', 'POST'])
+def reset_password(token):
+    """Reset password page"""
+    # Find valid reset token
+    reset_record = PasswordReset.query.filter_by(token=token, used=False).first()
+    
+    if not reset_record:
+        flash('Invalid or expired reset token.')
+        return redirect(url_for('login'))
+    
+    # Check if token has expired
+    if datetime.utcnow() > reset_record.expires_at:
+        flash('Reset token has expired. Please request a new one.')
+        db.session.delete(reset_record)
+        db.session.commit()
+        return redirect(url_for('forgot_password'))
+    
+    if request.method == 'POST':
+        new_password = request.form.get('password', '').strip()
+        confirm_password = request.form.get('confirm_password', '').strip()
+        
+        # Validate passwords
+        if not new_password or len(new_password) < 6:
+            flash('Password must be at least 6 characters long.')
+            return render_template('reset_password.html', token=token)
+        
+        if new_password != confirm_password:
+            flash('Passwords do not match.')
+            return render_template('reset_password.html', token=token)
+        
+        # Update user password
+        user = User.query.filter_by(email=reset_record.email).first()
+        if user:
+            user.password = generate_password_hash(new_password)
+            reset_record.used = True
+            db.session.commit()
+            flash('Password reset successful! You can now login with your new password.')
+            return redirect(url_for('login'))
+        else:
+            flash('User not found.')
+            return redirect(url_for('login'))
+    
+    return render_template('reset_password.html', token=token)
 
 @app.route('/dashboard', methods=['GET', 'POST'])
 def dashboard():
@@ -716,7 +528,7 @@ def create_tables():
         inspector = db.inspect(db.engine)
         existing_tables = inspector.get_table_names()
         
-        required_tables = ['user', 'otp', 'health_data']
+        required_tables = ['user', 'health_data', 'password_reset']
         missing_tables = [t for t in required_tables if t not in existing_tables]
         
         if missing_tables:
@@ -762,30 +574,10 @@ def migrate_database():
             print("User table doesn't exist. It should have been created by db.create_all()")
             return
         
-        # Check if 'verified' column exists by trying to query it
-        columns = [col['name'] for col in inspector.get_columns('user')]
-        
-        if 'verified' not in columns:
-            print("Migrating database: Adding 'verified' column to User table...")
-            try:
-                with db.engine.connect() as conn:
-                    # SQLite doesn't support adding NOT NULL columns with default easily
-                    # So we add it as nullable first, then update
-                    conn.execute(db.text("ALTER TABLE user ADD COLUMN verified BOOLEAN"))
-                    conn.execute(db.text("UPDATE user SET verified = 1 WHERE verified IS NULL"))
-                    conn.commit()
-                print("✓ Migration completed: 'verified' column added. Existing users marked as verified.")
-            except Exception as e2:
-                print(f"Migration error: {e2}")
-                print("If migration fails, you may need to delete instance/users.db and restart the app.")
-        else:
-            print("✓ Database schema is up to date.")
+        # Email verification removed - no migration needed for 'verified' column
+        print("✓ Database schema is up to date.")
             
-        # Check if OTP table exists
-        if 'otp' not in tables:
-            print("OTP table doesn't exist. Creating it...")
-            db.create_all()
-            print("✓ OTP table created.")
+        # OTP table removed - email verification module disabled
             
     except Exception as e:
         # If inspector fails, try a different approach
@@ -814,7 +606,7 @@ def init_database():
             try:
                 inspector = db.inspect(db.engine)
                 tables = inspector.get_table_names()
-                required_tables = ['user', 'otp', 'health_data']
+                required_tables = ['user', 'health_data', 'password_reset']
                 
                 missing_tables = [t for t in required_tables if t not in tables]
                 if missing_tables:
