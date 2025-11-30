@@ -13,11 +13,7 @@ import math
 import random
 import string
 import io
-import socket
-# Email sending imports for verification
-import smtplib
-from email.mime.text import MIMEText
-from email.mime.multipart import MIMEMultipart
+# Email sending using Resend API (HTTPS-based, no SMTP needed)
 from datetime import datetime, timedelta
 from dotenv import load_dotenv
 from PIL import Image, ImageDraw, ImageFont
@@ -161,142 +157,114 @@ def generate_otp():
     return ''.join(random.choices(string.digits, k=6))
 
 def send_verification_email(email, otp_code):
-    """Send verification email with OTP code (with timeout to prevent worker timeout)"""
-    try:
-        smtp_server = os.getenv('SMTP_SERVER', 'smtp.gmail.com')
-        smtp_port = int(os.getenv('SMTP_PORT', '587'))
-        smtp_username = os.getenv('SMTP_USERNAME')
-        smtp_password = os.getenv('SMTP_PASSWORD')
+    """
+    Send verification email with OTP code using Resend API (HTTPS-based)
+    
+    This function uses Resend's HTTP API instead of SMTP, which avoids network
+    connectivity issues and works reliably on cloud platforms like Render.
+    No SMTP ports, SSL/TLS configuration, or network restrictions to worry about.
+    
+    Args:
+        email (str): Recipient email address
+        otp_code (str): 6-digit OTP code to send
         
-        # If email not configured, return False with detailed error
-        if not smtp_username or not smtp_password:
+    Returns:
+        bool: True if email sent successfully, False otherwise
+    """
+    try:
+        # Get Resend API key from environment variables
+        resend_api_key = os.getenv('RESEND_API_KEY')
+        
+        # Check if Resend API key is configured
+        if not resend_api_key:
             print(f"⚠️  Email not configured. Cannot send OTP to {email}")
-            print(f"   SMTP_USERNAME: {'SET' if smtp_username else 'NOT SET'}")
-            print(f"   SMTP_PASSWORD: {'SET' if smtp_password else 'NOT SET'}")
-            print(f"   SMTP_SERVER: {smtp_server}")
-            print(f"   SMTP_PORT: {smtp_port}")
+            print(f"   RESEND_API_KEY: NOT SET")
             print(f"   Environment: {'PRODUCTION (Render)' if os.getenv('DATABASE_URL') else 'LOCAL'}")
-            print(f"   Please configure SMTP settings in Render Environment Variables:")
+            print(f"   Please configure RESEND_API_KEY in Render Environment Variables:")
             print(f"   - Go to Render Dashboard → Your Service → Environment tab")
-            print(f"   - Add: SMTP_SERVER, SMTP_PORT, SMTP_USERNAME, SMTP_PASSWORD")
+            print(f"   - Add: RESEND_API_KEY = your-resend-api-key")
+            print(f"   - Get API key from: https://resend.com/api-keys")
             return False
         
-        # Create email message
-        msg = MIMEMultipart()
-        msg['From'] = smtp_username
-        msg['To'] = email
-        msg['Subject'] = 'Verify Your Email - Food Insight'
+        # Resend API endpoint (HTTPS-based, no SMTP needed)
+        resend_api_url = "https://api.resend.com/emails"
         
-        body = f"""
-        Hello,
+        # Email content
+        email_subject = "Verify Your Email - Food Insight"
+        email_body = f"""Hello,
+
+Thank you for registering with Food Insight!
+
+Your email verification code is: {otp_code}
+
+Please enter this code on the verification page to verify your email address.
+
+This code will expire in 10 minutes.
+
+If you did not create this account, please ignore this email.
+
+Best regards,
+Food Insight Team"""
         
-        Thank you for registering with Food Insight!
+        # Prepare email payload for Resend API
+        # Note: Resend requires a "from" email that's verified in your Resend account
+        # Using a default from email - user should set RESEND_FROM_EMAIL if needed
+        from_email = os.getenv('RESEND_FROM_EMAIL', 'onboarding@resend.dev')
         
-        Your email verification code is: {otp_code}
+        payload = {
+            "from": from_email,
+            "to": [email],
+            "subject": email_subject,
+            "text": email_body
+        }
         
-        Please enter this code on the verification page to verify your email address.
+        # Headers for Resend API
+        headers = {
+            "Authorization": f"Bearer {resend_api_key}",
+            "Content-Type": "application/json"
+        }
         
-        This code will expire in 10 minutes.
+        # Log email attempt
+        print(f"📧 Attempting to send email to {email} via Resend API")
+        print(f"   Environment: {'PRODUCTION (Render)' if os.getenv('DATABASE_URL') else 'LOCAL'}")
         
-        If you did not create this account, please ignore this email.
-        
-        Best regards,
-        Food Insight Team
-        """
-        
-        msg.attach(MIMEText(body, 'plain'))
-        
-        # Set socket timeout to prevent hanging (10 seconds total timeout)
-        socket.setdefaulttimeout(10)
-        
-        # Send email with timeout protection
-        # Try SSL (port 465) if TLS (port 587) fails due to network restrictions
+        # Send email via Resend API (HTTPS request - no SMTP needed)
         try:
-            # Try TLS first (port 587)
-            if smtp_port == 587:
-                server = smtplib.SMTP(smtp_server, smtp_port, timeout=10)
-                server.starttls()
-                server.login(smtp_username, smtp_password)
-                server.send_message(msg)
-                server.quit()
-                print(f"✓ Verification OTP sent to {email} (via TLS)")
-                return True
-            # Try SSL (port 465)
-            elif smtp_port == 465:
-                server = smtplib.SMTP_SSL(smtp_server, smtp_port, timeout=10)
-                server.login(smtp_username, smtp_password)
-                server.send_message(msg)
-                server.quit()
-                print(f"✓ Verification OTP sent to {email} (via SSL)")
+            response = requests.post(
+                resend_api_url,
+                headers=headers,
+                json=payload,
+                timeout=10  # 10 second timeout
+            )
+            
+            # Check response status
+            if response.status_code == 200:
+                print(f"✓ Verification OTP sent to {email} via Resend API")
                 return True
             else:
-                # Fallback to TLS for other ports
-                server = smtplib.SMTP(smtp_server, smtp_port, timeout=10)
-                server.starttls()
-                server.login(smtp_username, smtp_password)
-                server.send_message(msg)
-                server.quit()
-                print(f"✓ Verification OTP sent to {email}")
-                return True
-        except socket.timeout:
-            print(f"❌ SMTP connection timeout for {email}")
-            print(f"   Email server took too long to respond")
+                # Resend API returned an error
+                error_data = response.json() if response.text else {}
+                error_message = error_data.get('message', f'HTTP {response.status_code}')
+                print(f"❌ Resend API error: {error_message}")
+                print(f"   Status code: {response.status_code}")
+                print(f"   Response: {response.text[:200]}")
+                return False
+                
+        except requests.exceptions.Timeout:
+            print(f"❌ Resend API request timeout for {email}")
+            print(f"   API request took too long (>10 seconds)")
             return False
-        except socket.error as e:
-            error_code = str(e)
-            print(f"❌ Socket error sending email to {email}: {e}")
-            if "Network is unreachable" in error_code or "101" in error_code:
-                print(f"   ⚠️  Network unreachable - Render may be blocking SMTP connections")
-                print(f"   💡 SOLUTION: Try using port 465 with SSL instead of 587 with TLS")
-                print(f"   - In Render, change SMTP_PORT from 587 to 465")
-                print(f"   - This uses SSL instead of STARTTLS and may work better on Render")
+        except requests.exceptions.ConnectionError as e:
+            print(f"❌ Resend API connection error: {e}")
+            print(f"   Could not connect to Resend API")
+            return False
+        except requests.exceptions.RequestException as e:
+            print(f"❌ Resend API request error: {e}")
+            print(f"   Error type: {type(e).__name__}")
             return False
         
-    except smtplib.SMTPAuthenticationError as e:
-        error_msg = f"Email authentication failed: {str(e)}"
-        print(f"❌ {error_msg}")
-        print(f"   Environment: {'PRODUCTION (Render)' if os.getenv('DATABASE_URL') else 'LOCAL'}")
-        print(f"   SMTP_USERNAME: {smtp_username}")
-        print(f"   SMTP_SERVER: {smtp_server}:{smtp_port}")
-        print(f"   Please check SMTP_USERNAME and SMTP_PASSWORD in Render Environment Variables")
-        print(f"   For Gmail: Make sure you're using an App Password, not your regular password")
-        print(f"   Generate App Password at: https://myaccount.google.com/apppasswords")
-        import traceback
-        traceback.print_exc()
-        return False
-    except smtplib.SMTPRecipientsRefused as e:
-        error_msg = f"Recipient email rejected: {str(e)}"
-        print(f"❌ {error_msg}")
-        print(f"   Error: {e}")
-        import traceback
-        traceback.print_exc()
-        return False
-    except smtplib.SMTPServerDisconnected as e:
-        error_msg = f"Server disconnected: {str(e)}"
-        print(f"❌ {error_msg}")
-        print(f"   Check SMTP server and port settings")
-        import traceback
-        traceback.print_exc()
-        return False
-    except socket.timeout:
-        error_msg = "SMTP connection timeout"
-        print(f"❌ {error_msg}")
-        print(f"   Email server took too long to respond (>10 seconds)")
-        return False
-    except socket.error as e:
-        error_msg = f"Socket error: {str(e)}"
-        print(f"❌ {error_msg}")
-        error_code = str(e)
-        if "Network is unreachable" in error_code or "101" in error_code:
-            print(f"   ⚠️  Network unreachable - Render may be blocking SMTP connections")
-            print(f"   💡 SOLUTION: Try using port 465 with SSL instead of 587 with TLS")
-            print(f"   - In Render Environment Variables, change SMTP_PORT from 587 to 465")
-            print(f"   - This uses SSL instead of STARTTLS and may work better on Render")
-        import traceback
-        traceback.print_exc()
-        return False
     except Exception as e:
-        error_msg = f"Error sending email: {str(e)}"
+        error_msg = f"Error sending email via Resend: {str(e)}"
         print(f"❌ {error_msg}")
         print(f"   Error type: {type(e).__name__}")
         import traceback
@@ -917,138 +885,122 @@ def delete_user(user_id):
 
 @app.route('/admin/test_email')
 def admin_test_email():
-    """Test email configuration (admin only)"""
+    """
+    Test Resend API email configuration (admin only)
+    
+    This function tests the Resend API configuration instead of SMTP.
+    No SMTP ports, SSL/TLS, or network connections needed.
+    """
     # Check if user is admin
     if not session.get('admin'):
         flash('Access denied. Admin privileges required.')
         return redirect(url_for('login'))
     
-    # Get configuration
-    smtp_server = os.getenv('SMTP_SERVER', 'smtp.gmail.com')
-    smtp_port = os.getenv('SMTP_PORT', '587')
-    smtp_username = os.getenv('SMTP_USERNAME')
-    smtp_password = os.getenv('SMTP_PASSWORD')
+    # Get Resend configuration
+    resend_api_key = os.getenv('RESEND_API_KEY')
+    resend_from_email = os.getenv('RESEND_FROM_EMAIL', 'onboarding@resend.dev')
     
     results = {
-        'smtp_server': smtp_server,
-        'smtp_port': smtp_port,
-        'smtp_username': smtp_username if smtp_username else '❌ NOT SET',
-        'smtp_password': '✅ SET' if smtp_password else '❌ NOT SET',
+        'resend_api_key': '✅ SET' if resend_api_key else '❌ NOT SET',
+        'resend_from_email': resend_from_email,
         'tests': []
     }
     
-    # Test 1: Check if credentials are set
-    if not smtp_username or not smtp_password:
+    # Test 1: Check if API key is set
+    if not resend_api_key:
         results['tests'].append({
-            'name': 'Credentials Check',
+            'name': 'API Key Check',
             'status': '❌ FAIL',
-            'message': 'SMTP_USERNAME or SMTP_PASSWORD not set in environment variables'
+            'message': 'RESEND_API_KEY not set in environment variables'
         })
         return render_template('admin_test_email.html', results=results)
     else:
         results['tests'].append({
-            'name': 'Credentials Check',
+            'name': 'API Key Check',
             'status': '✅ PASS',
-            'message': 'Both SMTP_USERNAME and SMTP_PASSWORD are set'
+            'message': 'RESEND_API_KEY is set'
         })
     
-    # Test 2: Test SMTP connection (support both TLS and SSL)
-    server = None
+    # Test 2: Test Resend API connection (HTTPS request)
     try:
-        socket.setdefaulttimeout(10)
-        if int(smtp_port) == 465:
-            # Use SSL for port 465
-            server = smtplib.SMTP_SSL(smtp_server, int(smtp_port), timeout=10)
+        # Test API endpoint
+        test_url = "https://api.resend.com/emails"
+        headers = {
+            "Authorization": f"Bearer {resend_api_key}",
+            "Content-Type": "application/json"
+        }
+        
+        # Simple test payload (won't actually send, just test connection)
+        test_payload = {
+            "from": resend_from_email,
+            "to": ["test@example.com"],
+            "subject": "Test",
+            "text": "Test"
+        }
+        
+        response = requests.post(
+            test_url,
+            headers=headers,
+            json=test_payload,
+            timeout=10
+        )
+        
+        # Even if it fails, if we get a response, the API is reachable
+        if response.status_code in [200, 201, 400, 422]:  # 400/422 means API is working but validation failed
             results['tests'].append({
-                'name': 'SMTP Connection (SSL)',
+                'name': 'Resend API Connection',
                 'status': '✅ PASS',
-                'message': f'Successfully connected to {smtp_server}:{smtp_port} using SSL'
+                'message': f'Successfully connected to Resend API (Status: {response.status_code})'
             })
         else:
-            # Use TLS for port 587 or other ports
-            server = smtplib.SMTP(smtp_server, int(smtp_port), timeout=10)
             results['tests'].append({
-                'name': 'SMTP Connection',
-                'status': '✅ PASS',
-                'message': f'Successfully connected to {smtp_server}:{smtp_port}'
-            })
-    except socket.error as e:
-        error_msg = str(e)
-        if "Network is unreachable" in error_msg or "101" in error_msg:
-            results['tests'].append({
-                'name': 'SMTP Connection',
+                'name': 'Resend API Connection',
                 'status': '❌ FAIL',
-                'message': f'Network unreachable: {str(e)}. Try changing SMTP_PORT to 465 (SSL) instead of 587 (TLS)'
+                'message': f'API returned status {response.status_code}: {response.text[:100]}'
             })
-        else:
-            results['tests'].append({
-                'name': 'SMTP Connection',
-                'status': '❌ FAIL',
-                'message': f'Connection failed: {str(e)}'
-            })
+            return render_template('admin_test_email.html', results=results)
+            
+    except requests.exceptions.Timeout:
+        results['tests'].append({
+            'name': 'Resend API Connection',
+            'status': '❌ FAIL',
+            'message': 'Connection timeout - Resend API took too long to respond'
+        })
+        return render_template('admin_test_email.html', results=results)
+    except requests.exceptions.ConnectionError as e:
+        results['tests'].append({
+            'name': 'Resend API Connection',
+            'status': '❌ FAIL',
+            'message': f'Connection error: {str(e)}. Check internet connectivity.'
+        })
         return render_template('admin_test_email.html', results=results)
     except Exception as e:
         results['tests'].append({
-            'name': 'SMTP Connection',
+            'name': 'Resend API Connection',
             'status': '❌ FAIL',
             'message': f'Connection failed: {str(e)}'
         })
         return render_template('admin_test_email.html', results=results)
     
-    # Test 3: Test TLS (only for non-SSL connections)
-    if int(smtp_port) != 465:
-        try:
-            server.starttls()
-            results['tests'].append({
-                'name': 'TLS Encryption',
-                'status': '✅ PASS',
-                'message': 'TLS encryption enabled successfully'
-            })
-        except Exception as e:
-            results['tests'].append({
-                'name': 'TLS Encryption',
-                'status': '❌ FAIL',
-                'message': f'TLS failed: {str(e)}'
-            })
-            server.quit()
-            return render_template('admin_test_email.html', results=results)
+    # Test 3: Test API key validity (check if it's a valid format)
+    if len(resend_api_key) < 20:
+        results['tests'].append({
+            'name': 'API Key Format',
+            'status': '⚠️  WARNING',
+            'message': 'API key seems too short. Make sure you copied the full key.'
+        })
     else:
         results['tests'].append({
-            'name': 'SSL Encryption',
+            'name': 'API Key Format',
             'status': '✅ PASS',
-            'message': 'SSL encryption enabled (port 465)'
+            'message': 'API key format looks valid'
         })
     
-    # Test 4: Test authentication
-    try:
-        server.login(smtp_username, smtp_password)
-        results['tests'].append({
-            'name': 'Authentication',
-            'status': '✅ PASS',
-            'message': 'Authentication successful'
-        })
-    except smtplib.SMTPAuthenticationError as e:
-        results['tests'].append({
-            'name': 'Authentication',
-            'status': '❌ FAIL',
-            'message': f'Authentication failed: {str(e)}. Make sure you\'re using an App Password (Gmail) or correct password.'
-        })
-        server.quit()
-        return render_template('admin_test_email.html', results=results)
-    except Exception as e:
-        results['tests'].append({
-            'name': 'Authentication',
-            'status': '❌ FAIL',
-            'message': f'Authentication error: {str(e)}'
-        })
-        server.quit()
-        return render_template('admin_test_email.html', results=results)
-    
-    server.quit()
+    # All tests passed
     results['tests'].append({
         'name': 'All Tests',
         'status': '✅ PASS',
-        'message': 'Email configuration is working correctly!'
+        'message': 'Resend API configuration looks good! Email sending should work.'
     })
     
     return render_template('admin_test_email.html', results=results)

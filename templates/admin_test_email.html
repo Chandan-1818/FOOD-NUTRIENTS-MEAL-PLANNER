@@ -78,12 +78,12 @@
         </div>
 
         <div class="config-info">
-            <h5>Current Configuration:</h5>
+            <h5>Current Configuration (Resend API):</h5>
             <ul class="mb-0">
-                <li><strong>SMTP Server:</strong> {{ results.smtp_server }}</li>
-                <li><strong>SMTP Port:</strong> {{ results.smtp_port }}</li>
-                <li><strong>SMTP Username:</strong> {{ results.smtp_username }}</li>
-                <li><strong>SMTP Password:</strong> {{ results.smtp_password }}</li>
+                <li><strong>Resend API Key:</strong> {{ results.resend_api_key }}</li>
+                <li><strong>From Email:</strong> {{ results.resend_from_email }}</li>
+                <li><strong>API Endpoint:</strong> https://api.resend.com/emails</li>
+                <li><strong>Method:</strong> HTTPS (no SMTP ports needed)</li>
             </ul>
         </div>
 
@@ -100,23 +100,24 @@
         <div class="mt-4">
             <h5>Next Steps:</h5>
             <ul>
-                {% if '❌' in results.smtp_username or '❌' in results.smtp_password %}
+                {% if '❌' in results.resend_api_key %}
                 <li>Go to Render Dashboard → Your Service → Environment tab</li>
-                <li>Add environment variables:
+                <li>Add environment variable:
                     <ul>
-                        <li><code>SMTP_SERVER</code> = <code>smtp.gmail.com</code></li>
-                        <li><code>SMTP_PORT</code> = <code>587</code></li>
-                        <li><code>SMTP_USERNAME</code> = <code>your-email@gmail.com</code></li>
-                        <li><code>SMTP_PASSWORD</code> = <code>your-app-password</code></li>
+                        <li><code>RESEND_API_KEY</code> = <code>your-resend-api-key</code></li>
+                        <li><code>RESEND_FROM_EMAIL</code> = <code>your-verified-email@domain.com</code> (optional, defaults to onboarding@resend.dev)</li>
                     </ul>
                 </li>
+                <li>Get your Resend API key from: <a href="https://resend.com/api-keys" target="_blank">Resend API Keys</a></li>
+                <li>Sign up for Resend at: <a href="https://resend.com" target="_blank">resend.com</a> (free tier available)</li>
                 {% elif results.tests|selectattr('status', 'equalto', '❌ FAIL')|list|length > 0 %}
                 <li>Check the error messages above</li>
-                <li>For Gmail: Make sure you're using an <strong>App Password</strong>, not your regular password</li>
-                <li>Enable 2-Step Verification on your Gmail account</li>
-                <li>Generate a new App Password at: <a href="https://myaccount.google.com/apppasswords" target="_blank">Google App Passwords</a></li>
+                <li>Verify your Resend API key is correct</li>
+                <li>Make sure your "from" email is verified in your Resend account</li>
+                <li>Check Resend dashboard for any account issues: <a href="https://resend.com" target="_blank">Resend Dashboard</a></li>
                 {% else %}
-                <li>✅ Email configuration is working correctly!</li>
+                <li>✅ Resend API configuration is working correctly!</li>
+                <li>Email sending should work via HTTPS (no SMTP ports needed)</li>
                 <li>If emails still fail, check Render logs for specific errors</li>
                 {% endif %}
             </ul>
