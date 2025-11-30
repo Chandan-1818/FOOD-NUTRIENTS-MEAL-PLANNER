@@ -13,6 +13,7 @@ import math
 import random
 import string
 import io
+import socket
 # Email sending imports for verification
 import smtplib
 from email.mime.text import MIMEText
@@ -23,6 +24,10 @@ from PIL import Image, ImageDraw, ImageFont
 
 # Load environment variables from .env file
 load_dotenv()
+
+# Admin credentials (hardcoded - cannot be changed or deleted)
+ADMIN_USERNAME = "CHANDAN"
+ADMIN_PASSWORD = "chandan...$$$"
 
 app = Flask(__name__)
 app.secret_key = os.getenv('SECRET_KEY', 'your_secret_key_change_in_production')  # Use environment variable or default
@@ -156,7 +161,7 @@ def generate_otp():
     return ''.join(random.choices(string.digits, k=6))
 
 def send_verification_email(email, otp_code):
-    """Send verification email with OTP code"""
+    """Send verification email with OTP code (with timeout to prevent worker timeout)"""
     try:
         smtp_server = os.getenv('SMTP_SERVER', 'smtp.gmail.com')
         smtp_port = int(os.getenv('SMTP_PORT', '587'))
@@ -194,15 +199,25 @@ def send_verification_email(email, otp_code):
         
         msg.attach(MIMEText(body, 'plain'))
         
-        # Send email
-        server = smtplib.SMTP(smtp_server, smtp_port)
-        server.starttls()
-        server.login(smtp_username, smtp_password)
-        server.send_message(msg)
-        server.quit()
+        # Set socket timeout to prevent hanging (10 seconds total timeout)
+        socket.setdefaulttimeout(10)
         
-        print(f"✓ Verification OTP sent to {email}")
-        return True
+        # Send email with timeout protection
+        try:
+            server = smtplib.SMTP(smtp_server, smtp_port, timeout=10)
+            server.starttls()
+            server.login(smtp_username, smtp_password)
+            server.send_message(msg)
+            server.quit()
+            print(f"✓ Verification OTP sent to {email}")
+            return True
+        except socket.timeout:
+            print(f"❌ SMTP connection timeout for {email}")
+            print(f"   Email server took too long to respond")
+            return False
+        except socket.error as e:
+            print(f"❌ Socket error sending email to {email}: {e}")
+            return False
         
     except smtplib.SMTPAuthenticationError as e:
         error_msg = f"Email authentication failed: {str(e)}"
@@ -223,6 +238,17 @@ def send_verification_email(email, otp_code):
         error_msg = f"Server disconnected: {str(e)}"
         print(f"❌ {error_msg}")
         print(f"   Check SMTP server and port settings")
+        import traceback
+        traceback.print_exc()
+        return False
+    except socket.timeout:
+        error_msg = "SMTP connection timeout"
+        print(f"❌ {error_msg}")
+        print(f"   Email server took too long to respond (>10 seconds)")
+        return False
+    except socket.error as e:
+        error_msg = f"Socket error: {str(e)}"
+        print(f"❌ {error_msg}")
         import traceback
         traceback.print_exc()
         return False
@@ -376,6 +402,29 @@ def analyze_food_with_gemini(image_path, user_data):
             'recommendation': "Try uploading a clearer image of your food"
         }
 
+# Global error handler for 500 errors (catches unhandled exceptions)
+@app.errorhandler(500)
+def internal_error(error):
+    """Handle 500 Internal Server Errors"""
+    try:
+        db.session.rollback()
+    except:
+        pass
+    
+    error_msg = str(error) if error else "Unknown error"
+    print(f"❌ 500 Internal Server Error: {error_msg}")
+    import traceback
+    print("Full traceback:")
+    traceback.print_exc()
+    
+    # Try to flash a message and redirect
+    try:
+        flash('An internal server error occurred. Please try again later.')
+        return redirect(url_for('login')), 500
+    except:
+        # If redirect fails, return a simple error page
+        return '<h1>500 Internal Server Error</h1><p>An error occurred. Please try again later.</p>', 500
+
 # Flask routes
 @app.route('/')
 def home():
@@ -408,6 +457,22 @@ def register():
                 session['register_captcha_code'] = code.upper()
                 return render_template('register.html', captcha_image=f'data:image/png;base64,{img_base64}')
 
+            # Prevent registration with admin username
+            if email.upper() == ADMIN_USERNAME:
+                flash('This username is reserved. Please use a different email address.')
+                code, img_base64 = generate_captcha()
+                session['register_captcha_code'] = code.upper()
+                return render_template('register.html', captcha_image=f'data:image/png;base64,{img_base64}')
+            
+            # Check if database tables exist
+            try:
+                # Test database connection
+                db.session.execute(text('SELECT 1'))
+            except Exception as db_test_error:
+                print(f"❌ Database connection test failed: {db_test_error}")
+                raise Exception(f"Database connection failed: {str(db_test_error)}")
+            
+            # Check if email is already registered (check both existing users and pending registrations)
             existing_user = User.query.filter_by(email=email).first()
             if existing_user:
                 flash('Email already registered.')
@@ -415,19 +480,29 @@ def register():
                 code, img_base64 = generate_captcha()
                 session['register_captcha_code'] = code.upper()
                 return render_template('register.html', captcha_image=f'data:image/png;base64,{img_base64}')
-
-            # Create user (unverified by default)
-            hashed_password = generate_password_hash(password)
-            new_user = User(
-                email=email, 
-                number=number, 
-                name=name, 
-                gender=gender, 
-                password=hashed_password,
-                verified=False
-            )
-            db.session.add(new_user)
-            db.session.commit()
+            
+            # Check if there's already a pending registration for this email
+            pending_verification = EmailVerification.query.filter_by(email=email, used=False).first()
+            if pending_verification:
+                # Check if OTP is still valid
+                if datetime.utcnow() <= pending_verification.expires_at:
+                    flash('An OTP has already been sent to this email. Please check your email or wait for it to expire.')
+                    session['verification_email'] = email
+                    return redirect(url_for('verify_otp'))
+                else:
+                    # Expired OTP, delete it
+                    db.session.delete(pending_verification)
+                    db.session.commit()
+            
+            # Store registration data in session (don't create user yet)
+            # Account will only be created after OTP verification
+            session['pending_registration'] = {
+                'email': email,
+                'number': number,
+                'name': name,
+                'gender': gender,
+                'password': password  # Store plain password temporarily, will hash when creating account
+            }
             
             # Generate OTP code
             otp_code = generate_otp()
@@ -436,40 +511,62 @@ def register():
             # Delete old verification OTPs for this email
             EmailVerification.query.filter_by(email=email).delete()
             
-            # Create new verification OTP
+            # Create new verification OTP (store in database for verification)
             verification = EmailVerification(
                 email=email,
                 otp=otp_code,
                 expires_at=expires_at
             )
             db.session.add(verification)
-            db.session.commit()
             
-            # Send verification email with OTP
-            email_sent = send_verification_email(email, otp_code)
+            # Commit only the OTP verification record (not the user account)
+            try:
+                db.session.commit()
+                print(f"✓ OTP generated for {email} (account not created yet)")
+            except Exception as db_error:
+                db.session.rollback()
+                error_type = type(db_error).__name__
+                print(f"❌ Database commit error [{error_type}]: {str(db_error)}")
+                raise  # Re-raise to be caught by outer exception handler
             
-            # Clear CAPTCHA from session after successful registration
+            # Clear CAPTCHA from session
             session.pop('register_captcha_code', None)
             
             # Store email in session for OTP verification page
             session['verification_email'] = email
             
-            if email_sent:
-                flash('Registration successful! Please check your email for the OTP code. If you don\'t see it, check your spam folder.')
-            else:
-                flash('Registration successful! However, email sending failed. Please check your email configuration or contact support.')
-                # Log OTP to console for debugging (not shown to user)
-                print(f"⚠️  OTP for {email} (email failed): {otp_code}")
+            # Send verification email with OTP (non-blocking - don't wait if it times out)
+            # This prevents worker timeout if email server is slow
+            try:
+                email_sent = send_verification_email(email, otp_code)
+                if email_sent:
+                    flash('Please check your email for the OTP code to complete registration. If you don\'t see it, check your spam folder.')
+                else:
+                    flash('OTP code sent! However, email sending failed. Please check your email configuration or contact support.')
+                    # Log OTP to console for debugging (not shown to user)
+                    print(f"⚠️  OTP for {email} (email failed): {otp_code}")
+            except Exception as email_error:
+                # If email sending causes any error, don't fail registration
+                print(f"⚠️  Email sending error (non-fatal): {email_error}")
+                flash('OTP code generated! However, email sending encountered an error. Please check your email configuration or contact support.')
+                print(f"⚠️  OTP for {email} (email error): {otp_code}")
             
             return redirect(url_for('verify_otp'))
             
         except Exception as e:
             db.session.rollback()
             error_msg = f"Registration failed: {str(e)}"
-            print(f"❌ Registration error: {error_msg}")
+            error_type = type(e).__name__
+            print(f"❌ Registration error [{error_type}]: {error_msg}")
             import traceback
+            print("Full traceback:")
             traceback.print_exc()
-            flash('An error occurred during registration. Please try again.')
+            
+            # Log additional context
+            print(f"   Email: {email if 'email' in locals() else 'N/A'}")
+            print(f"   Database URI: {app.config.get('SQLALCHEMY_DATABASE_URI', 'N/A')[:50]}...")
+            
+            flash(f'Registration error: {error_type}. Please try again or contact support.')
             # Generate new CAPTCHA for retry
             try:
                 code, img_base64 = generate_captcha()
@@ -502,7 +599,7 @@ def register():
 
 @app.route('/verify_otp', methods=['GET', 'POST'])
 def verify_otp():
-    """Verify user email with OTP code"""
+    """Verify user email with OTP code and create account only after verification"""
     # Get email from session or form
     email = session.get('verification_email') or request.form.get('email', '').strip()
     
@@ -533,22 +630,54 @@ def verify_otp():
             flash('OTP code has expired. Please request a new one.')
             db.session.delete(verification)
             db.session.commit()
+            # Clear pending registration if OTP expired
+            session.pop('pending_registration', None)
             return render_template('verify_otp.html', email=email)
         
-        # Find user and verify email
-        user = User.query.filter_by(email=email).first()
-        if user:
-            user.verified = True
-            verification.used = True
-            db.session.commit()
+        # Get pending registration data from session
+        pending_reg = session.get('pending_registration')
+        
+        if not pending_reg or pending_reg.get('email') != email:
+            flash('Registration session expired. Please register again.')
+            session.pop('pending_registration', None)
+            session.pop('verification_email', None)
+            return redirect(url_for('register'))
+        
+        # OTP is valid - NOW create the user account
+        try:
+            hashed_password = generate_password_hash(pending_reg['password'])
+            new_user = User(
+                email=pending_reg['email'],
+                number=pending_reg['number'],
+                name=pending_reg['name'],
+                gender=pending_reg['gender'],
+                password=hashed_password,
+                verified=True  # Mark as verified since OTP is confirmed
+            )
+            db.session.add(new_user)
             
-            # Clear verification email from session
+            # Mark OTP as used
+            verification.used = True
+            
+            # Commit user creation and OTP update
+            db.session.commit()
+            print(f"✓ User {email} created successfully after OTP verification")
+            
+            # Clear session data
+            session.pop('pending_registration', None)
             session.pop('verification_email', None)
             
-            flash('Email verified successfully! You can now login.')
+            flash('Email verified successfully! Your account has been created. You can now login.')
             return redirect(url_for('login'))
-        else:
-            flash('User not found.')
+            
+        except Exception as create_error:
+            db.session.rollback()
+            error_type = type(create_error).__name__
+            print(f"❌ Error creating user after OTP verification [{error_type}]: {str(create_error)}")
+            import traceback
+            traceback.print_exc()
+            flash('Error creating account. Please try registering again.')
+            session.pop('pending_registration', None)
             return redirect(url_for('register'))
     
     # GET request - show OTP verification page
@@ -556,19 +685,29 @@ def verify_otp():
 
 @app.route('/resend_otp', methods=['GET', 'POST'])
 def resend_otp():
-    """Resend verification OTP"""
+    """Resend verification OTP for pending registration"""
     if request.method == 'POST':
         email = request.form.get('email', '').strip()
+        
+        # Check if user already exists and is verified
         user = User.query.filter_by(email=email).first()
+        if user:
+            if user.verified:
+                flash('This email is already verified. You can login.')
+                return redirect(url_for('login'))
+            else:
+                # This shouldn't happen with new flow, but handle it
+                flash('Account exists but not verified. Please contact support.')
+                return redirect(url_for('login'))
         
-        if not user:
-            # Don't reveal if email exists (security)
-            flash('If an account with that email exists and is not verified, a verification OTP has been sent.')
-            return redirect(url_for('login'))
-        
-        if user.verified:
-            flash('This email is already verified. You can login.')
-            return redirect(url_for('login'))
+        # Check if there's a pending registration for this email
+        pending_reg = session.get('pending_registration')
+        if not pending_reg or pending_reg.get('email') != email:
+            # Check if there's a valid OTP in database
+            existing_verification = EmailVerification.query.filter_by(email=email, used=False).first()
+            if not existing_verification or datetime.utcnow() > existing_verification.expires_at:
+                flash('No pending registration found. Please register again.')
+                return redirect(url_for('register'))
         
         # Generate new OTP code
         otp_code = generate_otp()
@@ -587,17 +726,22 @@ def resend_otp():
         db.session.commit()
         
         # Send verification email with OTP
-        email_sent = send_verification_email(email, otp_code)
-        
-        # Store email in session for OTP verification page
-        session['verification_email'] = email
-        
-        if email_sent:
-            flash('Verification OTP sent! Please check your email. If you don\'t see it, check your spam folder.')
-        else:
-            flash('OTP sending failed. Please check your email configuration or contact support.')
-            # Log OTP to console for debugging (not shown to user)
-            print(f"⚠️  OTP for {email} (email failed): {otp_code}")
+        try:
+            email_sent = send_verification_email(email, otp_code)
+            
+            # Store email in session for OTP verification page
+            session['verification_email'] = email
+            
+            if email_sent:
+                flash('Verification OTP sent! Please check your email. If you don\'t see it, check your spam folder.')
+            else:
+                flash('OTP sending failed. Please check your email configuration or contact support.')
+                # Log OTP to console for debugging (not shown to user)
+                print(f"⚠️  OTP for {email} (email failed): {otp_code}")
+        except Exception as email_error:
+            print(f"⚠️  Email sending error (non-fatal): {email_error}")
+            flash('OTP generated but email sending encountered an error. Please check your email configuration.')
+            print(f"⚠️  OTP for {email} (email error): {otp_code}")
         
         return redirect(url_for('verify_otp'))
     
@@ -608,6 +752,15 @@ def login():
     if request.method == 'POST':
         email = request.form['email']
         password_input = request.form['password']
+        
+        # Check for admin login (hardcoded credentials - not in database)
+        if email.upper() == ADMIN_USERNAME and password_input == ADMIN_PASSWORD:
+            session['admin'] = True
+            session['admin_username'] = ADMIN_USERNAME
+            flash('Admin login successful!')
+            return redirect(url_for('admin_dashboard'))
+        
+        # Regular user login
         user = User.query.filter_by(email=email).first()
 
         if user and check_password_hash(user.password, password_input):
@@ -624,6 +777,91 @@ def login():
         else:
             flash('Invalid email or password.')
     return render_template('login.html')
+
+@app.route('/admin/dashboard')
+def admin_dashboard():
+    """Admin dashboard to view and manage all users"""
+    # Check if user is admin
+    if not session.get('admin'):
+        flash('Access denied. Admin privileges required.')
+        return redirect(url_for('login'))
+    
+    # Get all users
+    users = User.query.order_by(User.id.desc()).all()
+    
+    # Get user statistics
+    total_users = len(users)
+    verified_users = len([u for u in users if u.verified])
+    unverified_users = total_users - verified_users
+    
+    return render_template('admin_dashboard.html', 
+                         users=users, 
+                         total_users=total_users,
+                         verified_users=verified_users,
+                         unverified_users=unverified_users)
+
+@app.route('/admin/delete_user/<int:user_id>', methods=['POST'])
+def delete_user(user_id):
+    """Delete a user account (admin only) - Admin account is protected and cannot be deleted"""
+    # Check if user is admin
+    if not session.get('admin'):
+        flash('Access denied. Admin privileges required.')
+        return redirect(url_for('login'))
+    
+    try:
+        user = User.query.get_or_404(user_id)
+        
+        # STRICT PROTECTION: Prevent deletion of admin account
+        # Multiple checks to ensure admin account cannot be deleted
+        if (user.email.upper() == ADMIN_USERNAME or 
+            user.email.upper() == ADMIN_USERNAME.upper() or
+            user.name.upper() == ADMIN_USERNAME or
+            str(user_id) == "0"):  # Additional safety check
+            flash('❌ ERROR: Admin account is protected and cannot be deleted!')
+            print(f"⚠️  Attempted deletion of protected admin account: {user.email}")
+            return redirect(url_for('admin_dashboard'))
+        
+        # Additional check: Prevent deletion if email contains admin username
+        if ADMIN_USERNAME.upper() in user.email.upper():
+            flash('❌ ERROR: This account is protected and cannot be deleted!')
+            print(f"⚠️  Attempted deletion of protected account: {user.email}")
+            return redirect(url_for('admin_dashboard'))
+        
+        # Delete associated health data
+        deleted_health = HealthData.query.filter_by(user_id=user_id).delete()
+        
+        # Delete associated email verifications
+        deleted_verifications = EmailVerification.query.filter_by(email=user.email).delete()
+        
+        # Delete password reset tokens
+        deleted_resets = PasswordReset.query.filter_by(email=user.email).delete()
+        
+        # Store email for logging before deletion
+        user_email = user.email
+        
+        # Delete user
+        db.session.delete(user)
+        db.session.commit()
+        
+        flash(f'✓ User {user_email} has been deleted successfully.')
+        print(f"✓ Admin deleted user: {user_email} (Health data: {deleted_health}, Verifications: {deleted_verifications}, Resets: {deleted_resets})")
+        
+    except Exception as e:
+        db.session.rollback()
+        print(f"❌ Error deleting user: {e}")
+        import traceback
+        traceback.print_exc()
+        flash('Error deleting user. Please try again.')
+    
+    return redirect(url_for('admin_dashboard'))
+
+@app.route('/admin/logout')
+def admin_logout():
+    """Logout admin"""
+    session.pop('admin', None)
+    session.pop('admin_username', None)
+    flash('Admin logged out successfully.')
+    return redirect(url_for('login'))
 
 @app.route('/captcha')
 def captcha():
