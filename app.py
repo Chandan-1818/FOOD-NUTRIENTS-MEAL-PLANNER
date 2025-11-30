@@ -750,18 +750,25 @@ def resend_otp():
 @app.route('/login', methods=['GET', 'POST'])
 def login():
     if request.method == 'POST':
-        email = request.form['email']
-        password_input = request.form['password']
+        email = request.form.get('email', '').strip()
+        password_input = request.form.get('password', '').strip()
+        
+        # Debug logging
+        print(f"🔍 Login attempt - Email: '{email}', Password length: {len(password_input)}")
+        print(f"   Admin username check: '{email.upper()}' == '{ADMIN_USERNAME}' = {email.upper() == ADMIN_USERNAME}")
         
         # Exception: If email matches admin username, only check admin credentials (skip database query)
         if email.upper() == ADMIN_USERNAME:
             # Admin login attempt - check admin password
+            print(f"   Admin login detected - Checking password...")
             if password_input == ADMIN_PASSWORD:
                 session['admin'] = True
                 session['admin_username'] = ADMIN_USERNAME
+                print(f"✓ Admin login successful!")
                 flash('Admin login successful!')
                 return redirect(url_for('admin_dashboard'))
             else:
+                print(f"❌ Admin password incorrect. Expected: '{ADMIN_PASSWORD}', Got: '{password_input}'")
                 flash('Invalid admin password.')
                 return render_template('login.html')
         
