@@ -143,6 +143,42 @@
             </div>
         </div>
 
+        {% if pending_otps %}
+        <div class="user-table mb-4">
+            <h3 class="mb-3">Pending OTPs (For Troubleshooting)</h3>
+            <div class="table-responsive">
+                <table class="table table-striped table-hover">
+                    <thead>
+                        <tr>
+                            <th>Email</th>
+                            <th>OTP Code</th>
+                            <th>Created At</th>
+                            <th>Expires At</th>
+                            <th>Status</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        {% for otp in pending_otps %}
+                        <tr>
+                            <td>{{ otp.email }}</td>
+                            <td><strong style="font-size: 18px; color: #667eea;">{{ otp.otp }}</strong></td>
+                            <td>{{ otp.created_at.strftime('%Y-%m-%d %H:%M:%S') }}</td>
+                            <td>{{ otp.expires_at.strftime('%Y-%m-%d %H:%M:%S') }}</td>
+                            <td>
+                                {% if otp.expires_at > now %}
+                                    <span class="badge-verified">Valid</span>
+                                {% else %}
+                                    <span class="badge-unverified">Expired</span>
+                                {% endif %}
+                            </td>
+                        </tr>
+                        {% endfor %}
+                    </tbody>
+                </table>
+            </div>
+        </div>
+        {% endif %}
+
         <div class="user-table">
             <h3 class="mb-3">All Users</h3>
             

@@ -806,11 +806,16 @@ def admin_dashboard():
     verified_users = len([u for u in users if u.verified])
     unverified_users = total_users - verified_users
     
+    # Get pending OTPs (for troubleshooting email issues)
+    pending_otps = EmailVerification.query.filter_by(used=False).order_by(EmailVerification.created_at.desc()).limit(10).all()
+    
     return render_template('admin_dashboard.html', 
                          users=users, 
                          total_users=total_users,
                          verified_users=verified_users,
-                         unverified_users=unverified_users)
+                         unverified_users=unverified_users,
+                         pending_otps=pending_otps,
+                         now=datetime.utcnow)
 
 @app.route('/admin/delete_user/<int:user_id>', methods=['POST'])
 def delete_user(user_id):
