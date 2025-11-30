@@ -384,81 +384,121 @@ def home():
 @app.route('/register', methods=['GET', 'POST'])
 def register():
     if request.method == 'POST':
-        email = request.form.get('email', '').strip()
-        number = request.form.get('number', '').strip()
-        name = request.form.get('name', '').strip()
-        gender = request.form.get('gender', '').strip()
-        password = request.form.get('password', '').strip()
-        captcha_input = request.form.get('captcha', '').strip().upper()
-        captcha_code = session.get('register_captcha_code', '').upper()
-        
-        # Verify CAPTCHA
-        if not captcha_code or captcha_input != captcha_code:
-            flash('Invalid CAPTCHA code. Please try again.')
-            # Generate new CAPTCHA
-            code, img_base64 = generate_captcha()
-            session['register_captcha_code'] = code.upper()
-            return render_template('register.html', captcha_image=f'data:image/png;base64,{img_base64}')
+        try:
+            email = request.form.get('email', '').strip()
+            number = request.form.get('number', '').strip()
+            name = request.form.get('name', '').strip()
+            gender = request.form.get('gender', '').strip()
+            password = request.form.get('password', '').strip()
+            captcha_input = request.form.get('captcha', '').strip().upper()
+            captcha_code = session.get('register_captcha_code', '').upper()
+            
+            # Validate required fields
+            if not all([email, number, name, gender, password]):
+                flash('Please fill in all required fields.')
+                code, img_base64 = generate_captcha()
+                session['register_captcha_code'] = code.upper()
+                return render_template('register.html', captcha_image=f'data:image/png;base64,{img_base64}')
+            
+            # Verify CAPTCHA
+            if not captcha_code or captcha_input != captcha_code:
+                flash('Invalid CAPTCHA code. Please try again.')
+                # Generate new CAPTCHA
+                code, img_base64 = generate_captcha()
+                session['register_captcha_code'] = code.upper()
+                return render_template('register.html', captcha_image=f'data:image/png;base64,{img_base64}')
 
-        existing_user = User.query.filter_by(email=email).first()
-        if existing_user:
-            flash('Email already registered.')
+            existing_user = User.query.filter_by(email=email).first()
+            if existing_user:
+                flash('Email already registered.')
+                # Generate new CAPTCHA for retry
+                code, img_base64 = generate_captcha()
+                session['register_captcha_code'] = code.upper()
+                return render_template('register.html', captcha_image=f'data:image/png;base64,{img_base64}')
+
+            # Create user (unverified by default)
+            hashed_password = generate_password_hash(password)
+            new_user = User(
+                email=email, 
+                number=number, 
+                name=name, 
+                gender=gender, 
+                password=hashed_password,
+                verified=False
+            )
+            db.session.add(new_user)
+            db.session.commit()
+            
+            # Generate OTP code
+            otp_code = generate_otp()
+            expires_at = datetime.utcnow() + timedelta(minutes=10)  # OTP valid for 10 minutes
+            
+            # Delete old verification OTPs for this email
+            EmailVerification.query.filter_by(email=email).delete()
+            
+            # Create new verification OTP
+            verification = EmailVerification(
+                email=email,
+                otp=otp_code,
+                expires_at=expires_at
+            )
+            db.session.add(verification)
+            db.session.commit()
+            
+            # Send verification email with OTP
+            email_sent = send_verification_email(email, otp_code)
+            
+            # Clear CAPTCHA from session after successful registration
+            session.pop('register_captcha_code', None)
+            
+            # Store email in session for OTP verification page
+            session['verification_email'] = email
+            
+            if email_sent:
+                flash('Registration successful! Please check your email for the OTP code. If you don\'t see it, check your spam folder.')
+            else:
+                flash('Registration successful! However, email sending failed. Please check your email configuration or contact support.')
+                # Log OTP to console for debugging (not shown to user)
+                print(f"⚠️  OTP for {email} (email failed): {otp_code}")
+            
+            return redirect(url_for('verify_otp'))
+            
+        except Exception as e:
+            db.session.rollback()
+            error_msg = f"Registration failed: {str(e)}"
+            print(f"❌ Registration error: {error_msg}")
+            import traceback
+            traceback.print_exc()
+            flash('An error occurred during registration. Please try again.')
             # Generate new CAPTCHA for retry
-            code, img_base64 = generate_captcha()
-            session['register_captcha_code'] = code.upper()
-            return render_template('register.html', captcha_image=f'data:image/png;base64,{img_base64}')
-
-        # Create user (unverified by default)
-        hashed_password = generate_password_hash(password)
-        new_user = User(
-            email=email, 
-            number=number, 
-            name=name, 
-            gender=gender, 
-            password=hashed_password,
-            verified=False
-        )
-        db.session.add(new_user)
-        db.session.commit()
-        
-        # Generate OTP code
-        otp_code = generate_otp()
-        expires_at = datetime.utcnow() + timedelta(minutes=10)  # OTP valid for 10 minutes
-        
-        # Delete old verification OTPs for this email
-        EmailVerification.query.filter_by(email=email).delete()
-        
-        # Create new verification OTP
-        verification = EmailVerification(
-            email=email,
-            otp=otp_code,
-            expires_at=expires_at
-        )
-        db.session.add(verification)
-        db.session.commit()
-        
-        # Send verification email with OTP
-        email_sent = send_verification_email(email, otp_code)
-        
-        # Clear CAPTCHA from session after successful registration
-        session.pop('register_captcha_code', None)
-        
-        # Store email in session for OTP verification page
-        session['verification_email'] = email
-        
-        if email_sent:
-            flash('Registration successful! Please check your email for the OTP code. If you don\'t see it, check your spam folder.')
-        else:
-            flash('Registration successful! However, email sending failed. Please check your email configuration or contact support.')
-            # Log OTP to console for debugging (not shown to user)
-            print(f"⚠️  OTP for {email} (email failed): {otp_code}")
-        
-        return redirect(url_for('verify_otp'))
+            try:
+                code, img_base64 = generate_captcha()
+                session['register_captcha_code'] = code.upper()
+                return render_template('register.html', captcha_image=f'data:image/png;base64,{img_base64}')
+            except Exception as captcha_error:
+                print(f"❌ Error generating CAPTCHA: {captcha_error}")
+                flash('Error loading registration page. Please refresh.')
+                return redirect(url_for('register'))
     
     # GET request - generate CAPTCHA
-    code, img_base64 = generate_captcha()
-    session['register_captcha_code'] = code.upper()
-    return render_template('register.html', captcha_image=f'data:image/png;base64,{img_base64}')
+    try:
+        code, img_base64 = generate_captcha()
+        session['register_captcha_code'] = code.upper()
+        return render_template('register.html', captcha_image=f'data:image/png;base64,{img_base64}')
+    except Exception as e:
+        print(f"❌ Error in GET register: {e}")
+        import traceback
+        traceback.print_exc()
+        flash('Error loading registration page. Please try again.')
+        # Try to generate a simple fallback CAPTCHA
+        try:
+            code, img_base64 = generate_captcha()
+            session['register_captcha_code'] = code.upper()
+            return render_template('register.html', captcha_image=f'data:image/png;base64,{img_base64}')
+        except:
+            # Last resort: redirect to login if CAPTCHA generation completely fails
+            flash('Unable to load registration page. Please contact support.')
+            return redirect(url_for('login'))
 
 @app.route('/verify_otp', methods=['GET', 'POST'])
 def verify_otp():
