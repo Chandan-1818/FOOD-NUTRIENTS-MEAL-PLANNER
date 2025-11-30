@@ -753,14 +753,19 @@ def login():
         email = request.form['email']
         password_input = request.form['password']
         
-        # Check for admin login (hardcoded credentials - not in database)
-        if email.upper() == ADMIN_USERNAME and password_input == ADMIN_PASSWORD:
-            session['admin'] = True
-            session['admin_username'] = ADMIN_USERNAME
-            flash('Admin login successful!')
-            return redirect(url_for('admin_dashboard'))
+        # Exception: If email matches admin username, only check admin credentials (skip database query)
+        if email.upper() == ADMIN_USERNAME:
+            # Admin login attempt - check admin password
+            if password_input == ADMIN_PASSWORD:
+                session['admin'] = True
+                session['admin_username'] = ADMIN_USERNAME
+                flash('Admin login successful!')
+                return redirect(url_for('admin_dashboard'))
+            else:
+                flash('Invalid admin password.')
+                return render_template('login.html')
         
-        # Regular user login
+        # Regular user login (only if email is not admin username)
         user = User.query.filter_by(email=email).first()
 
         if user and check_password_hash(user.password, password_input):
