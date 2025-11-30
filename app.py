@@ -210,20 +210,46 @@ def send_verification_email(email, otp_code):
         socket.setdefaulttimeout(10)
         
         # Send email with timeout protection
+        # Try SSL (port 465) if TLS (port 587) fails due to network restrictions
         try:
-            server = smtplib.SMTP(smtp_server, smtp_port, timeout=10)
-            server.starttls()
-            server.login(smtp_username, smtp_password)
-            server.send_message(msg)
-            server.quit()
-            print(f"✓ Verification OTP sent to {email}")
-            return True
+            # Try TLS first (port 587)
+            if smtp_port == 587:
+                server = smtplib.SMTP(smtp_server, smtp_port, timeout=10)
+                server.starttls()
+                server.login(smtp_username, smtp_password)
+                server.send_message(msg)
+                server.quit()
+                print(f"✓ Verification OTP sent to {email} (via TLS)")
+                return True
+            # Try SSL (port 465)
+            elif smtp_port == 465:
+                server = smtplib.SMTP_SSL(smtp_server, smtp_port, timeout=10)
+                server.login(smtp_username, smtp_password)
+                server.send_message(msg)
+                server.quit()
+                print(f"✓ Verification OTP sent to {email} (via SSL)")
+                return True
+            else:
+                # Fallback to TLS for other ports
+                server = smtplib.SMTP(smtp_server, smtp_port, timeout=10)
+                server.starttls()
+                server.login(smtp_username, smtp_password)
+                server.send_message(msg)
+                server.quit()
+                print(f"✓ Verification OTP sent to {email}")
+                return True
         except socket.timeout:
             print(f"❌ SMTP connection timeout for {email}")
             print(f"   Email server took too long to respond")
             return False
         except socket.error as e:
+            error_code = str(e)
             print(f"❌ Socket error sending email to {email}: {e}")
+            if "Network is unreachable" in error_code or "101" in error_code:
+                print(f"   ⚠️  Network unreachable - Render may be blocking SMTP connections")
+                print(f"   💡 SOLUTION: Try using port 465 with SSL instead of 587 with TLS")
+                print(f"   - In Render, change SMTP_PORT from 587 to 465")
+                print(f"   - This uses SSL instead of STARTTLS and may work better on Render")
             return False
         
     except smtplib.SMTPAuthenticationError as e:
@@ -260,6 +286,12 @@ def send_verification_email(email, otp_code):
     except socket.error as e:
         error_msg = f"Socket error: {str(e)}"
         print(f"❌ {error_msg}")
+        error_code = str(e)
+        if "Network is unreachable" in error_code or "101" in error_code:
+            print(f"   ⚠️  Network unreachable - Render may be blocking SMTP connections")
+            print(f"   💡 SOLUTION: Try using port 465 with SSL instead of 587 with TLS")
+            print(f"   - In Render Environment Variables, change SMTP_PORT from 587 to 465")
+            print(f"   - This uses SSL instead of STARTTLS and may work better on Render")
         import traceback
         traceback.print_exc()
         return False
@@ -920,15 +952,41 @@ def admin_test_email():
             'message': 'Both SMTP_USERNAME and SMTP_PASSWORD are set'
         })
     
-    # Test 2: Test SMTP connection
+    # Test 2: Test SMTP connection (support both TLS and SSL)
+    server = None
     try:
         socket.setdefaulttimeout(10)
-        server = smtplib.SMTP(smtp_server, int(smtp_port), timeout=10)
-        results['tests'].append({
-            'name': 'SMTP Connection',
-            'status': '✅ PASS',
-            'message': f'Successfully connected to {smtp_server}:{smtp_port}'
-        })
+        if int(smtp_port) == 465:
+            # Use SSL for port 465
+            server = smtplib.SMTP_SSL(smtp_server, int(smtp_port), timeout=10)
+            results['tests'].append({
+                'name': 'SMTP Connection (SSL)',
+                'status': '✅ PASS',
+                'message': f'Successfully connected to {smtp_server}:{smtp_port} using SSL'
+            })
+        else:
+            # Use TLS for port 587 or other ports
+            server = smtplib.SMTP(smtp_server, int(smtp_port), timeout=10)
+            results['tests'].append({
+                'name': 'SMTP Connection',
+                'status': '✅ PASS',
+                'message': f'Successfully connected to {smtp_server}:{smtp_port}'
+            })
+    except socket.error as e:
+        error_msg = str(e)
+        if "Network is unreachable" in error_msg or "101" in error_msg:
+            results['tests'].append({
+                'name': 'SMTP Connection',
+                'status': '❌ FAIL',
+                'message': f'Network unreachable: {str(e)}. Try changing SMTP_PORT to 465 (SSL) instead of 587 (TLS)'
+            })
+        else:
+            results['tests'].append({
+                'name': 'SMTP Connection',
+                'status': '❌ FAIL',
+                'message': f'Connection failed: {str(e)}'
+            })
+        return render_template('admin_test_email.html', results=results)
     except Exception as e:
         results['tests'].append({
             'name': 'SMTP Connection',
@@ -937,22 +995,29 @@ def admin_test_email():
         })
         return render_template('admin_test_email.html', results=results)
     
-    # Test 3: Test TLS
-    try:
-        server.starttls()
+    # Test 3: Test TLS (only for non-SSL connections)
+    if int(smtp_port) != 465:
+        try:
+            server.starttls()
+            results['tests'].append({
+                'name': 'TLS Encryption',
+                'status': '✅ PASS',
+                'message': 'TLS encryption enabled successfully'
+            })
+        except Exception as e:
+            results['tests'].append({
+                'name': 'TLS Encryption',
+                'status': '❌ FAIL',
+                'message': f'TLS failed: {str(e)}'
+            })
+            server.quit()
+            return render_template('admin_test_email.html', results=results)
+    else:
         results['tests'].append({
-            'name': 'TLS Encryption',
+            'name': 'SSL Encryption',
             'status': '✅ PASS',
-            'message': 'TLS encryption enabled successfully'
+            'message': 'SSL encryption enabled (port 465)'
         })
-    except Exception as e:
-        results['tests'].append({
-            'name': 'TLS Encryption',
-            'status': '❌ FAIL',
-            'message': f'TLS failed: {str(e)}'
-        })
-        server.quit()
-        return render_template('admin_test_email.html', results=results)
     
     # Test 4: Test authentication
     try:
