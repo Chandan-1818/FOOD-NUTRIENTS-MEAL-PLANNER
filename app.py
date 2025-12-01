@@ -1,29 +1,31 @@
-from flask import Flask, render_template, request, redirect, url_for, session, flash, send_from_directory
-from flask_sqlalchemy import SQLAlchemy
-from werkzeug.security import generate_password_hash, check_password_hash
-from werkzeug.utils import secure_filename
-from sqlalchemy import text
+# Standard library imports
 import os
 import uuid
 import base64
-import requests
 import json
 import re
 import math
 import random
 import string
 import io
-# Email sending using Resend API (HTTPS-based, no SMTP needed)
 from datetime import datetime, timedelta
-from dotenv import load_dotenv
-from PIL import Image, ImageDraw, ImageFont
 
-# Load environment variables from .env file
+# Third-party imports
+from dotenv import load_dotenv
+from flask import Flask, render_template, request, redirect, url_for, session, flash, send_from_directory
+from flask_sqlalchemy import SQLAlchemy
+from werkzeug.security import generate_password_hash, check_password_hash
+from werkzeug.utils import secure_filename
+from sqlalchemy import text
+from PIL import Image, ImageDraw, ImageFont
+import requests
+
+# Load environment variables from .env file first
 load_dotenv()
 
-# Admin credentials (hardcoded - cannot be changed or deleted)
-ADMIN_USERNAME = "CHANDAN"
-ADMIN_PASSWORD = "chandan...$$$"
+# Admin credentials from environment variables with fallbacks
+ADMIN_USERNAME = os.getenv('ADMIN_USERNAME', 'CHANDAN')
+ADMIN_PASSWORD = os.getenv('ADMIN_PASSWORD', 'chandan...$$$')
 
 app = Flask(__name__)
 app.secret_key = os.getenv('SECRET_KEY', 'your_secret_key_change_in_production')  # Use environment variable or default
@@ -211,6 +213,13 @@ Food Insight Team"""
         # Using a default from email - user should set RESEND_FROM_EMAIL if needed
         from_email = os.getenv('RESEND_FROM_EMAIL', 'onboarding@resend.dev')
         
+        # For testing purposes, you can force the recipient to be your verified email
+        # Remove these lines in production
+        test_mode = os.getenv('TEST_MODE', 'false').lower() == 'true'
+        if test_mode:
+            print(f"⚠️  TEST MODE: Redirecting email from {email} to your verified email")
+            email = from_email
+        
         payload = {
             "from": from_email,
             "to": [email],
@@ -248,6 +257,17 @@ Food Insight Team"""
                 print(f"❌ Resend API error: {error_message}")
                 print(f"   Status code: {response.status_code}")
                 print(f"   Response: {response.text[:200]}")
+                
+                # Provide helpful error message for unverified emails
+                if 'not a valid sender' in str(error_data).lower():
+                    print("\n⚠️  Error: The 'from' email address is not verified in your Resend account.")
+                    print("   Please verify your email address in the Resend dashboard:")
+                    print("   https://resend.com/email-verification")
+                elif 'not authorized' in str(error_data).lower():
+                    print("\n⚠️  Error: The recipient's email domain is not verified.")
+                    print("   In test mode, you can only send to verified email addresses.")
+                    print("   For production, verify your domain in the Resend dashboard:")
+                    print("   https://resend.com/domains")
                 return False
                 
         except requests.exceptions.Timeout:
@@ -276,9 +296,36 @@ def analyze_food_with_gemini(image_path, user_data):
     Analyze food image using Google's Gemini API
     """
     try:
+        # Debug: Print current working directory and environment
+        print("\n=== Debug Information ===")
+        print(f"Current working directory: {os.getcwd()}")
+        print(f"Environment variables: {os.environ.get('GEMINI_API_KEY', 'Not found')}")
+        
         # Google Gemini API settings
-        API_KEY = "AIzaSyAOr1fscByIEIHVs6Gav-90_wV9hVE8IE4"  # Your Gemini API key
+        API_KEY = os.getenv('GEMINI_API_KEY')
+        print(f"API Key loaded: {'Yes' if API_KEY else 'No'}")
+        if API_KEY:
+            print(f"API Key starts with: {API_KEY[:5]}...")
+            
+        if not API_KEY:
+            # Try to load from .env file directly as a fallback
+            try:
+                from dotenv import load_dotenv
+                load_dotenv()
+                API_KEY = os.getenv('GEMINI_API_KEY')
+                print(f"After dotenv load - API Key: {'Yes' if API_KEY else 'No'}")
+                if not API_KEY:
+                    raise ValueError("""
+                    GEMINI_API_KEY environment variable not found.
+                    Please make sure you have a .env file in your project root with:
+                    GEMINI_API_KEY=your_actual_gemini_api_key_here
+                    """)
+            except ImportError:
+                raise ImportError("python-dotenv package is required. Please install it with: pip install python-dotenv")
+            
         API_URL = "https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent"
+        print(f"Using API URL: {API_URL}")
+        print("=========================\n")
         
         # Read the image file and convert to base64
         with open(image_path, "rb") as image_file:
@@ -347,6 +394,17 @@ def analyze_food_with_gemini(image_path, user_data):
         if response.status_code == 200:
             response_data = response.json()
             
+            # Check for API errors in the response
+            if 'error' in response_data:
+                error_msg = response_data.get('error', {}).get('message', 'Unknown API error')
+                print(f"Gemini API error: {error_msg}")
+                if 'API key' in error_msg:
+                    raise ValueError("Invalid or missing Gemini API key. Please check your GEMINI_API_KEY environment variable.")
+                elif 'quota' in error_msg.lower():
+                    raise ValueError("API quota exceeded. Please check your Google Cloud account or upgrade your plan.")
+                else:
+                    raise Exception(f"Gemini API error: {error_msg}")
+            
             # Extract the text response
             if 'candidates' in response_data and len(response_data['candidates']) > 0:
                 text_response = response_data['candidates'][0]['content']['parts'][0]['text']
@@ -403,14 +461,34 @@ def analyze_food_with_gemini(image_path, user_data):
             'recommendation': "Try uploading a clearer image of your food"
         }
     
-    except Exception as e:
-        print(f"Error in Gemini API call: {e}")
+    except requests.exceptions.RequestException as e:
+        print(f"Network error while calling Gemini API: {e}")
         return {
-            'food_name': "Could not identify food",
-            'nutrition': "<ul><li>Nutritional information unavailable</li></ul>",
-            'good_for_user': "Unable to assess",
-            'diet_plan': "Please consult a nutritionist for personalized advice",
-            'recommendation': "Try uploading a clearer image of your food"
+            'food_name': "Network Error",
+            'nutrition': "<ul><li>Could not connect to the analysis service</li></ul>",
+            'good_for_user': "Service unavailable",
+            'diet_plan': "Please check your internet connection and try again",
+            'recommendation': "If the problem persists, please try again later"
+        }
+    except ValueError as e:
+        print(f"Configuration error: {e}")
+        return {
+            'food_name': "Configuration Error",
+            'nutrition': "<ul><li>Service configuration issue</li></ul>",
+            'good_for_user': "Unable to process request",
+            'diet_plan': "Please contact support with this error message:",
+            'recommendation': str(e)
+        }
+    except Exception as e:
+        print(f"Unexpected error in Gemini API call: {e}")
+        import traceback
+        traceback.print_exc()
+        return {
+            'food_name': "Analysis Failed",
+            'nutrition': "<ul><li>An unexpected error occurred</li></ul>",
+            'good_for_user': "Unable to process",
+            'diet_plan': "Please try again with a different image",
+            'recommendation': "If the problem persists, please contact support"
         }
 
 # Global error handler for 500 errors (catches unhandled exceptions)
@@ -820,13 +898,17 @@ def admin_dashboard():
     # Get pending OTPs (for troubleshooting email issues)
     pending_otps = EmailVerification.query.filter_by(used=False).order_by(EmailVerification.created_at.desc()).limit(10).all()
     
+    # Get current time in UTC
+    current_time = datetime.utcnow()
+    
     return render_template('admin_dashboard.html', 
                          users=users, 
                          total_users=total_users,
                          verified_users=verified_users,
                          unverified_users=unverified_users,
                          pending_otps=pending_otps,
-                         now=datetime.utcnow)
+                         now=current_time,
+                         ADMIN_USERNAME=ADMIN_USERNAME)
 
 @app.route('/admin/delete_user/<int:user_id>', methods=['POST'])
 def delete_user(user_id):

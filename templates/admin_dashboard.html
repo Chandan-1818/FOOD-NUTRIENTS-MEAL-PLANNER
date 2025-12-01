@@ -213,11 +213,15 @@
                                 {% endif %}
                             </td>
                             <td>
-                                {% if user.email.upper() == 'CHANDAN' %}
+                                {% if user.email.upper() == ADMIN_USERNAME.upper() or user.name.upper() == ADMIN_USERNAME.upper() %}
                                     <span style="color: #dc3545; font-weight: bold;">🔒 Protected</span>
                                 {% else %}
-                                    <form id="delete-form-{{ user.id }}" action="{{ url_for('delete_user', user_id=user.id) }}" method="POST" style="display: inline;">
-                                        <button type="button" class="btn-delete" data-user-id="{{ user.id }}" data-user-email="{{ user.email }}">🗑️ Delete</button>
+                                    <form id="delete-form-{{ user.id }}" action="{{ url_for('delete_user', user_id=user.id) }}" method="POST" style="display: inline-block;">
+                                        <button type="button" class="btn-delete btn btn-sm btn-outline-danger" 
+                                                data-user-id="{{ user.id }}" 
+                                                data-user-email="{{ user.email }}">
+                                            🗑️ Delete
+                                        </button>
                                     </form>
                                 {% endif %}
                             </td>
